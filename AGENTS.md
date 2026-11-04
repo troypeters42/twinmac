@@ -94,6 +94,8 @@ Add `xsim.dir/`, `.Xil/`, `*.jou`, `*.log`, `*.pb`, and `*.wdb` to `.gitignore`.
 
 - Use plain SystemVerilog that `xsim`, Icarus Verilog, and Yosys all accept. Put one module in each file, named after the file.
 - Start design files with ``  `default_nettype none ``. Declare every signal.
+- Use `input wire logic` for input ports in every SystemVerilog design file.
+- Keep `` `timescale 1ns/1ps `` in every SystemVerilog design file.
 - Use `logic`, `always_ff`, and `always_comb`. Use `<=` in clocked blocks and `=` in combinational blocks.
 - Use `always_ff @(posedge clk or negedge rst_n)` for reset registers.
 - Use a typed enum, a next-state block, and a state register for each FSM. Use `unique case` with a `default`.
@@ -168,7 +170,7 @@ Build from the smallest block upward, and finish each row before starting the ne
 | 3 | `src/weight_sr.sv`, `sim/tb_weight_sr.sv` | A 72-bit pattern lands in all nine byte fields correctly |
 | 4 | `src/control_fsm.sv`, `sim/tb_control_fsm.sv` | Every control output matches the table below, cycle by cycle |
 | 5 | `src/twinmac_core.sv`, `sim/tb_twinmac_core.sv` | All golden vectors and at least 10,000 random cases pass |
-| 6 | `src/tt_um_troypeters42_twinmac.sv`, `sim/tb_twinmac.sv`, `info.yaml`, `test/Makefile`, `test/tb.v`, `test/test.py`, `docs/info.md` | Chip-pin tests pass, and **test**, **gds**, **precheck**, and **gl_test** pass on `rtl` |
+| 6 | `src/tt_um_troypeters42_twinmac.sv`, `sim/tb_twinmac.sv`, `info.yaml`, `test/Makefile`, `test/tb.v`, `test/test.py`, `docs/info.md`; delete `src/project.v` | Chip-pin tests pass, and **test**, **gds**, **precheck**, and **gl_test** pass on `rtl` |
 | 7 | Mutation results in `docs/rtl_notes.md` | Every required mutation makes a test fail |
 | 8 | `fpga/nexys_top.sv`, `fpga/twinmac.xdc`, `fpga/build.tcl`, `sim/tb_nexys_top.sv` | Simulation passes, timing closes at 100 MHz, and Troy confirms the board |
 | 9 | `fpga/oled_ctrl.sv`, `fpga/oled_text.sv` (optional) | Troy confirms all three OLED bring-up stages |
@@ -176,7 +178,7 @@ Build from the smallest block upward, and finish each row before starting the ne
 
 ### `clamp`
 
-This block is combinational. It has `input logic signed [16:0] value` and `output logic [6:0] clamped`. Negative values give 0, values above 127 give 127, and all others pass through.
+This block is combinational. It has `input wire logic signed [16:0] value` and `output logic [6:0] clamped`. Negative values give 0, values above 127 give 127, and all others pass through.
 
 ### `mac_unit`
 
@@ -259,6 +261,8 @@ The wrapper adds these circuits:
 **Pin timing:** Keep `sdi` and `ui_in` stable for at least 5 clock cycles on each side of the related rising edge. Hold every control pin high and low for at least 5 cycles each. Use this timing in every chip-pin test and in `nexys_top`.
 
 Step 6 also has to update the template files:
+
+- **`src/project.v`:** Delete this template source in step 6 when replacing the example top.
 
 - **`info.yaml`:** Keep the current `title`, `author`, and `description`. Set the values below, and fill in the pin names for the used pins.
 

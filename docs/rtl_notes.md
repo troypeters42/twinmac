@@ -6,7 +6,7 @@
 - Repository: C:\Users\petet\twinmac.
 - Working branch: rtl, created locally from origin/main at 162764d.
 - Step 1 is complete; Troy reproduced the passing test and approved it on Nov 4, 2026.
-- Step 2 has not started. No push has been made.
+- Step 2 has not started. Troy authorized pushing rtl for step 1 review.
 
 ## Confirmed working decisions
 
@@ -123,3 +123,33 @@ No expected values or checks were changed to resolve either tool error.
 Only xsim has been run; Icarus, Yosys, chip builds, and the board are unverified.
 There are no unresolved questions for step 1. Troy independently reran the test,
 reported ALL TESTS PASSED, and approved this step. The next planned block is the MAC unit.
+
+## Step 1 review rerun (Nov 4, 2026)
+
+Troy requested a fresh run before pushing rtl for review. The clamp section
+above was checked and is present. The existing RTL, testbench, runner, and
+expected values were unchanged. The following command exited with code 0
+when run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_clamp -Sources @('src\clamp.sv', 'sim\tb_clamp.sv')
+```
+
+The last 10 lines of its console output were:
+
+```text
+# xsim {tb_clamp_sim} -autoloadwcfg -runall
+Time resolution is 1 ps
+run -all
+Checked 131072 signed inputs (-65536 through 65535).
+ALL TESTS PASSED
+$finish called at time : 131072 ns : File "C:/Users/petet/TwinMac/sim/tb_clamp.sv" Line 56
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 18:40:59 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_clamp.run.log
+ALL TESTS PASSED
+```
+
+AGENTS.md now requires input wire logic and a 1ns/1ps timescale in every
+SystemVerilog design file, and schedules deletion of src/project.v in step 6.
+The existing clamp already satisfies both coding rules. Step 2 has not started.
