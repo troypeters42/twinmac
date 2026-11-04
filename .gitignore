@@ -11,3 +11,12 @@ test/sim_build
 test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
+
+# Vivado simulation and FPGA build artifacts
+xsim.dir/
+.Xil/
+*.jou
+*.log
+*.pb
+*.wdb
+fpga/build/
