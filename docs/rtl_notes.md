@@ -768,10 +768,12 @@ uio_out and uio_oe are always zero. ena and uio_in[7:5] are unused.
 
 ### Pin timing and verification
 
-Both testbenches operate only through chip pins. They keep sdi and ui_in
-stable for at least five clock cycles before and after their related
-control rising edge. Every control high and low lasts at least five cycles.
-They never shift weights or latch new inputs during a computation.
+Both testbenches drive the chip pins using the specified protocol. They
+keep sdi and ui_in stable for at least five clock cycles before and after
+their related control rising edge. Every control high and low lasts at
+least five cycles. They never shift weights or latch new inputs during a
+computation. test/test.py observes only chip pins. sim/tb_twinmac.sv also
+reads internal wrapper stages for the exact-latency checks described below.
 
 sim/tb_twinmac.sv uses a 20 ns clock. test/test.py uses the same protocol
 with a slow 1000 ns functional clock so UNIT_DELAY gate models can settle.
@@ -779,7 +781,9 @@ That gate-level test is a functional check, not a 50 MHz timing measurement;
 the physical flow must establish timing separately.
 
 Both tests use the 24 literal golden truth-table outputs, eight directed
-corners, and two computations after reset: 34 completed results in total.
+corners, and two computations after reset: test/test.py keeps 34 completed
+results. sim/tb_twinmac.sv adds one result during the latency checks, for
+35 completed results.
 The corners include both +32895 accumulators, the negative accumulator
 corner, second-pass saturation, both hidden values at 64, unequal input
 weights, and signed inputs.
@@ -787,10 +791,20 @@ weights, and signed inputs.
 Checks explicitly require the old done flag to clear before completion,
 the new flag to remain set, and both UIO output buses to stay zero. Changing
 ui_in after latching proves that the input registers hold their bytes.
-ena alternates without affecting the result. Reset is checked between
+ena alternates during weight loading as well as gate cases without
+changing the result. Reset is checked between
 clock edges, with retained weights and cleared input bytes. An in-flight
 reset must cancel the run without producing a stale completion flag.
 Unknown output bits fail comparisons or integer conversion.
+
+Review added exact-latency checks to sim/tb_twinmac.sv. Internal reads check
+that reset remains asserted after one edge and releases after two; the
+control first stage samples its pin on the third edge after reset release.
+Serial data must reach the core after two edges. A rising start pin
+produces a one-cycle core pulse after edge 2, is accepted on edge 3 (E0),
+clears the flag on edge 3, and sets it on edge 10, one edge after the
+result becomes valid. These reads observe actual signals only; expected
+values remain literal checks from the specified timing.
 
 ### Actual local verification
 
@@ -800,18 +814,18 @@ Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
 & .\sim\run_xsim.ps1 -Testbench tb_twinmac -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','sim\tb_twinmac.sv')
 ```
 
-The runner exited with code 0. There were 34 completed chip-pin results,
-17982 checks, and zero failures. The last 10 command-output lines were:
+The review rerun exited with code 0. There were 35 completed chip-pin results,
+18056 checks, and zero failures. The last 10 command-output lines were:
 
 ```text
-Eight directed chip-pin corners completed.
 Reset, retained weights, zeroed inputs, and aborted run checked.
-Completed chip-pin results: 34.
-Chip-pin checks completed: 17982; failures: 0.
+Exact wrapper latency checked.
+Completed chip-pin results: 35.
+Chip-pin checks completed: 18056; failures: 0.
 ALL TESTS PASSED
-$finish called at time : 336011 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac.sv" Line 201
+$finish called at time : 337111 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac.sv" Line 281
 exit
-INFO: [Common 17-206] Exiting xsim at Wed Nov  4 23:20:01 2026...
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 00:07:42 2026...
 Verification log: C:\Users\petet\twinmac\sim\logs\tb_twinmac.run.log
 ALL TESTS PASSED
 ```

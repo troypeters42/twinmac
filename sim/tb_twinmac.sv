@@ -65,6 +65,7 @@ module tb_twinmac;
       for (bit_number = 32'sd71; bit_number >= 32'sd0; bit_number = bit_number - 32'sd1) begin
         @(negedge clk);
         uio_in[0] = word[bit_number];
+        ena = bit_number[0];
         tick(32'd5);
         pulse_pin(32'd1);
         check_output(expected_y, expected_flag, "weight loading holds output and flag");
@@ -145,6 +146,83 @@ module tb_twinmac;
     end
   endtask
 
+  task automatic check_signal(input logic actual, input logic wanted, input string context_name);
+    begin
+      checks = checks + 32'd1;
+      if (actual !== wanted) begin
+        failures = failures + 32'd1;
+        if (failures <= 32'd16) begin
+          $display("Mismatch (%s): expected=%b actual=%b at %0t",
+                   context_name, wanted, actual, $time);
+        end
+      end
+    end
+  endtask
+
+  // The five-cycle pin protocol hides exact wrapper latency, so read the stages directly.
+  task automatic check_wrapper_latency;
+    begin
+      // Reset release takes two edges. A pin held high reaches the first stage on the third.
+      @(negedge clk);
+      rst_n = 1'b0;
+      uio_in = 8'd0;
+      ui_in = 8'd0;
+      expected_y = 7'd0;
+      expected_flag = 1'b0;
+      tick(32'd5);
+      @(negedge clk);
+      uio_in[3] = 1'b1;
+      rst_n = 1'b1;
+      tick(32'd1);
+      check_signal(dut.core.rst_n, 1'b0, "core reset still low after one edge");
+      check_signal(dut.control_meta[2], 1'b0, "control stage held in reset after one edge");
+      tick(32'd1);
+      check_signal(dut.core.rst_n, 1'b1, "core reset releases after two edges");
+      check_signal(dut.control_meta[2], 1'b0, "control stage held in reset after two edges");
+      tick(32'd1);
+      check_signal(dut.control_meta[2], 1'b1, "control stage samples pin on third edge");
+      tick(32'd2);
+      @(negedge clk);
+      uio_in[3] = 1'b0;
+      tick(32'd5);
+
+      // sdi and the control pins both take two edges to reach the core.
+      @(negedge clk);
+      uio_in[0] = 1'b1;
+      tick(32'd1);
+      check_signal(dut.core.sdi, 1'b0, "sdi not at core after one edge");
+      tick(32'd1);
+      check_signal(dut.core.sdi, 1'b1, "sdi reaches core after two edges");
+      tick(32'd3);
+      @(negedge clk);
+      uio_in[0] = 1'b0;
+      tick(32'd5);
+
+      // start: pulse after edge 2, accepted on edge 3 (E0), result on edge 9, flag on edge 10.
+      start_and_wait(7'd10);
+      @(negedge clk);
+      uio_in[2] = 1'b1;
+      tick(32'd1);
+      check_signal(dut.core.start, 1'b0, "no start pulse after one edge");
+      check_signal(uo_out[7], 1'b1, "flag holds after one edge");
+      tick(32'd1);
+      check_signal(dut.core.start, 1'b1, "start pulse after two edges");
+      check_signal(uo_out[7], 1'b1, "flag holds after two edges");
+      tick(32'd1);
+      check_signal(dut.core.start, 1'b0, "start pulse lasts one cycle");
+      check_signal(uo_out[7], 1'b0, "flag clears on third edge");
+      tick(32'd2);
+      @(negedge clk);
+      uio_in[2] = 1'b0;
+      tick(32'd4);
+      check_signal(uo_out[7], 1'b0, "flag still low on ninth edge");
+      tick(32'd1);
+      check_signal(uo_out[7], 1'b1, "flag rises on tenth edge");
+      tick(32'd5);
+      check_output(7'd10, 1'b1, "latency run result");
+    end
+  endtask
+
   initial begin
     rst_n = 1'b0;
     ena = 1'b1;
@@ -194,6 +272,8 @@ module tb_twinmac;
     check_output(7'd0, 1'b0, "reset abort does not produce stale done");
     start_and_wait(7'd10);
     $display("Reset, retained weights, zeroed inputs, and aborted run checked.");
+    check_wrapper_latency();
+    $display("Exact wrapper latency checked.");
     $display("Completed chip-pin results: %0d.", cases_completed);
     $display("Chip-pin checks completed: %0d; failures: %0d.", checks, failures);
     if (failures == 32'd0) $display("ALL TESTS PASSED");
