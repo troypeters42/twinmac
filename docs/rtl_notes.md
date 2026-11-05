@@ -2,15 +2,29 @@
 
 ## Current status
 
-- Date: Nov 4, 2026.
-- Repository: C:\Users\petet\twinmac.
-- Working branch: rtl, created locally from origin/main at 162764d.
-- Step 1 is complete; Troy reproduced the passing test and approved it on Nov 4, 2026.
-- Step 1 is committed and pushed on rtl.
-- Step 2 is committed as fec9360 and pushed on rtl.
-- Step 3 is committed as 4489ce1 and pushed on rtl.
-- Step 4 is committed as 6027a6d and pushed on rtl.
-- Step 5 passed the requested MAC 1 corner rerun and was approved for commit and push.
+- Updated Nov 5, 2026. Repository: C:\Users\petet\twinmac; working branch: rtl.
+- main remains at 162764d. All implementation commits below are on rtl.
+- The final ASIC measurements come from 93ed933, GDS run 41988729116.
+  Its six GitHub jobs passed. This documentation commit preserves that design.
+
+| Step | Commit | Current result |
+| --- | --- | --- |
+| 1: clamp | 156a403; review/rules follow-up fefa178 | Complete; exhaustive test passed |
+| 2: MAC unit | fec9360 | Complete; reviewed reset-release test included |
+| 3: weight register | 4489ce1 | Complete |
+| 4: control FSM | 6027a6d | Complete |
+| 5: TwinMAC core | 1f75cbb | Complete; both accumulator-high paths checked |
+| 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
+| 7: required mutations | c105b87 | Complete; every required mutation was caught |
+| 8: Nexys Video demo | 93ed933 | Design approved; **board test pending** |
+| 9: optional OLED | No commit | **Skipped for now** at Troy's request |
+| 10: final notes and measurements | This commit, "Complete final RTL notes and verify all seven xsim testbenches" | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
+
+The approved ASIC timing configuration is f71810b, between steps 7 and 8.
+It adds the 2 ns setup-repair margin and all-corner setup gate. The clock
+period remains 20 ns and placement density remains 60%. The remaining
+open items are 303 max-slew checks, one max-fanout check, the two FPGA
+LUT-packing warnings, and Troy's physical board observations.
 
 ## Confirmed working decisions
 
@@ -27,6 +41,143 @@ completion before requesting another run.
 
 Python expected-value calculations inside cocotb tests are allowed; a separate
 Python model remains out of scope. Keep the OLED off until optional step 9.
+
+## Answers to the nine AGENTS.md questions
+
+### Q1: Why can't one neuron do XOR, and how do three neurons do it?
+
+One neuron draws a single straight line through the (x1, x2) plane:
+its weighted sum changes from nonpositive to positive across that line.
+XOR's 1s are at (0,1) and (1,0), while its 0s are at (0,0) and (1,1).
+No straight line separates those two pairs of opposite corners. Clamping
+a single weighted sum therefore cannot make XOR.
+
+The real XOR preset is 72'h00_FE_01_FF_01_01_00_01_01. Its hidden
+weights give h1=clamp(x1+x2) and h2=clamp(-1+x1+x2). The output weights
+are a=1, c=-2, b=0, so y=clamp(h1-2*h2). For these Boolean inputs,
+the last clamp does not change the result:
+
+| x1 | x2 | h1 | h2 | y = h1 - 2*h2 |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 0 | 0 | 0 | 0 |
+| 0 | 1 | 1 | 0 | 1 |
+| 1 | 0 | 1 | 0 | 1 |
+| 1 | 1 | 2 | 1 | 0 |
+
+h1 counts the 1s. h2 detects the case where both inputs are 1. Subtracting
+two copies of h2 removes that case, leaving exactly one input high.
+[Step 5](#step-5-twinmac-core) describes how the hardware computes these
+three neurons using two MAC units.
+
+### Q2: Why is the accumulator 17 bits?
+
+Two signed products plus bias can reach +32895, above the signed 16-bit
+maximum of +32767. Seventeen signed bits preserve that result and the
+-32640 low corner without wrapping. The complete ranges and arithmetic
+are in [Why the accumulator is 17 bits](#why-the-accumulator-is-17-bits).
+
+### Q3: Why does the clamp have to act on the full sum?
+
+The two products and bias must finish adding before deciding whether
+the neuron is negative, in range, or too large. The clamp must see all
+17 signed bits: taking only the low seven bits can turn -1 into 127 or
+128 into 0. [Step 1](#step-1-clamp) explains these examples and the
+exhaustive check; [Step 5](#step-5-twinmac-core) shows the final-sum wiring.
+
+### Q4: What happens in each of the six steps, and why is MAC 0 used twice?
+
+Steps 1 and 2 add the two products for both hidden neurons in parallel.
+Step 3 stores their clamped results in h1 and h2. Steps 4 and 5 reuse
+MAC 0 for the output neuron's two products, and step 6 stores y and
+raises done. Step 4's first control replaces the old hidden sum with
+the output bias plus its first product. This reuse needs two multipliers
+rather than a separate multiplier pair for each neuron. The edge-by-edge
+table is in [What happens on the six compute edges](#what-happens-on-the-six-compute-edges).
+
+### Q5: How do the 72 weight bits get into the chip?
+
+The caller sends all nine weight bytes serially, most significant bit
+first. Each synchronized sck pulse enables one shift on the chip clock;
+bit 71 enters first and bit 0 last. After 72 shifts the nine fields are
+in their specified positions. sck is a strobe, not another internal clock.
+[Why most significant bit goes first](#why-most-significant-bit-goes-first)
+shows the field order, and [Step 6](#step-6-tiny-tapeout-chip-wrapper)
+describes synchronization and the five-cycle pin setup/hold protocol.
+
+### Q6: Why does the ASIC need a real reset and input synchronizers?
+
+ASIC flip-flops have an unknown power-up state. They do not receive the
+FPGA configuration step that sets FPGA flip-flops to known initial values.
+Reset gives the chip a known control state, zero inputs/results, and a
+cleared done flag before it starts work. Reset assertion is asynchronous;
+the wrapper releases its internal reset through two clocked stages.
+
+An external pin can change at any time relative to the chip clock. If it
+changes too close to the sampling edge, the receiving flip-flop can go
+metastable: it takes extra time to settle to a valid 0 or 1. The first
+synchronizer stage gets almost a full clock cycle to settle before the
+second stage samples it. That greatly reduces the risk of an unsettled
+value reaching the control logic. The control pins and sdi use these
+two stages; the data-byte bus instead follows the specified stable-data
+protocol before its synchronized latch pulse. See the actual circuits
+and timing rules in [Step 6](#step-6-tiny-tapeout-chip-wrapper).
+
+The weight register needs no reset because the caller overwrites all
+72 bits before the first start. That pushes every unknown old bit out.
+Avoiding reset on those 72 flip-flops saves reset hardware. The caller
+must complete the load before computing; later resets preserve the
+already-loaded weights. [Step 3](#step-3-weight-shift-register) explains
+the shift/hold behavior and checks it bit by bit.
+
+### Q7: What do setup and hold slack mean, and why use different corners?
+
+Slack is the margin before a timing requirement is broken. For setup,
+slack is required time minus arrival time: data must arrive before the
+receiving register's setup deadline. Positive slack passes; negative
+slack means data arrives too late.
+
+The real worst path begins at core.controller.state[1], mapped to cell
+_2554_. Its printed path report gives:
+
+```text
+setup slack = required time - arrival time
+20.643263 ns - 19.711073 ns ~= +0.932191 ns (reported STA result)
+```
+
+The displayed arrival/required times are rounded: subtracting those
+printed values gives 0.932190 ns, while STA's full-precision subtraction
+reports +0.932191 ns. The reported result is retained above.
+
+For hold, new data must not arrive too soon after the receiving clock
+edge. Hold slack is earliest arrival time minus the minimum required
+time; a positive result means the old value was held long enough.
+Slow logic is worst for setup, while fast logic is worst for hold.
+The existing process/temperature/voltage and RC-corner explanation,
+including the actual nine results, is in
+[Setup, hold, and all nine corners](#setup-hold-and-all-nine-corners).
+
+### Q8: What do DRC and LVS each prove?
+
+DRC checks that the layout obeys the foundry's geometry rules, such as
+minimum widths, spacing, and required overlaps. LVS extracts a circuit
+from that layout and checks that it matches the reference gate-level
+netlist: the expected devices and connections must be present.
+
+Neither proves that the design is functionally correct or meets timing.
+Simulation checks behavior against expected results, and static timing
+analysis checks setup and hold. The actual check counts and remaining
+limitations are in [Physical checks and remaining limitations](#physical-checks-and-remaining-limitations),
+with the separate build/precheck DRC coverage in [DRC scope and status](#drc-scope-and-status).
+
+### Q9: What assumptions sit behind the power number?
+
+The 4.647541 mW number is a model-based estimate at 50 MHz, typical
+process, 25 C, 1.80 V, and nominal extracted RC. It uses default input
+activity and propagated internal activity, not a measured workload VCD.
+Clock-tree power is already included. Different input activity, loading,
+idle time, voltage, temperature, or process can change the estimate.
+[Power assumptions and what the estimate covers](#power-assumptions-and-what-the-estimate-covers)
+records the exact defaults, loads, limitations, and source reports.
 
 ## Step 1: clamp
 
@@ -1273,7 +1424,7 @@ unchanged by this step. The FPGA uses the same chip wrapper as the ASIC.
 Status: **board test pending**. Troy approved the design and supplement.
 This step records the local simulation/implementation result and the
 approved review changes; physical board observations are still required.
-Steps 9 and 10 have not started.
+Optional step 9 is skipped for now; step 10 records the existing ASIC run.
 
 ### Hardware and clock-edge behavior
 
@@ -1430,8 +1581,12 @@ and the constant input bits; module LUT counts alone do not prove it.
 Negative and large x values are not exercised on hardware. The +0.606 ns
 setup result and zero DSP count apply only to this Boolean demo bitstream;
 they do not show that two full signed-eight-bit multipliers run at 100 MHz.
-The general multipliers and full signed input range are verified in RTL
-simulation only. The unchanged ASIC sources retain both full multipliers.
+The full signed range is verified in simulation: at RTL, and with the
+specified extreme test vectors on the gate-level netlist through gl_test.
+The unchanged ASIC sources retain both full multipliers. The cocotb
+chip-pin test includes both +32895 accumulator paths, the -32640 corner,
+and negative inputs. Its gate-level run uses functional UNIT_DELAY models
+at a 1 us clock, not a timing measurement at 50 or 100 MHz.
 Vivado's logs do not state why it selected LUT logic rather than DSPs, so
 its specific mapping heuristic remains unproven.
 
@@ -1620,6 +1775,22 @@ These warnings remain an implementation limitation. Bitstream generation
 passed, but no claim that the warnings are harmless is made. Post-route
 functional simulation and board observations have not been performed.
 
+### What the AND board row checks
+
+Every board preset gives MAC 1 the same weights: b2=8'hFF (-1),
+w22=8'h01 (1), and w21=8'h01 (1). Thus h2 is the clamped value of
+-1 + x1 + x2 for all six gates. The AND preset has output bias b=0,
+a=0, and c=1, so its output is y=h2 directly.
+
+The AND row, with LD1 through LD6 off, is therefore the direct board
+check of the MAC 1 / clamp1 / h2 logic associated with PDRC-144 and
+PDRC-146. For inputs (0,0), (0,1), (1,0), and (1,1), the complete
+seven-bit result must be 0, 0, 0, and 1; checking only LD0 would miss
+unexpected upper result bits. This is a planned check, still board-test
+pending. These four cases are the only MAC 1 computations this bitstream can perform,
+because its presets and Boolean inputs are fixed. A pass therefore covers MAC 1
+for this bitstream. It does not explain the warnings or carry over to a rebuild.
+
 ### Board verification and review checkpoint
 
 ## Nexys Video board-test checklist
@@ -1665,4 +1836,427 @@ Inputs are written as (x1, x2), meaning (SW0, SW1). Each cell is expected LD0 / 
 Board observations and programming have not been performed by Codex.
 
 Step 8 is committed with **board test pending**. Troy must report all board
-observations before hardware acceptance. Steps 9 and 10 have not started.
+observations before hardware acceptance. Optional step 9 is skipped for now;
+step 10 records the existing ASIC run.
+
+## Step 10: Final ASIC area, power, and maximum frequency
+
+### Scope and final-run provenance
+
+Troy authorized this documentation step after the six jobs on 93ed933
+passed and max_ss setup remained +0.932191 ns. Optional step 9 is skipped
+for now. Step 8 still has a physical board test pending; these ASIC
+measurements do not complete that board acceptance.
+
+The measured hardware/configuration is commit
+93ed9336332b825106a2125844bdb7f302f562f1 on rtl. Its ASIC source, tests,
+info.yaml, and configuration are unchanged from f71810b. No source,
+test, pin, clock-period, placement-density, or configuration change was
+made for this step. All seven local xsim testbenches were rerun on the
+unchanged design, as recorded below. No ASIC or FPGA implementation was
+rerun locally.
+
+The final measurement source is [GDS run 41988729116](https://github.com/troypeters42/twinmac/actions/runs/41988729116),
+GDS_logs artifact 13397585857. The downloaded ZIP matches GitHub's
+published SHA-256 digest:
+
+```text
+415851ce40f5b29e04a3a2c54a9959e11772baa1a2181db67c90d0354e9272b4
+```
+
+The artifact identifies LibreLane 3.0.14 and sky130_fd_sc_hd. Its source
+and configuration content match the current tree. All report paths below
+are relative to this GDS_logs artifact, not a previous timing experiment.
+
+| GitHub job | Observed result |
+| --- | --- |
+| [test](https://github.com/troypeters42/twinmac/actions/runs/41988729222/job/127115597653) | passed |
+| [docs](https://github.com/troypeters42/twinmac/actions/runs/41988729258/job/127115597926) | passed |
+| [gds](https://github.com/troypeters42/twinmac/actions/runs/41988729116/job/127115597238) | passed |
+| [precheck](https://github.com/troypeters42/twinmac/actions/runs/41988729116/job/127117723101) | passed |
+| [gl_test](https://github.com/troypeters42/twinmac/actions/runs/41988729116/job/127117723097) | passed |
+| [viewer](https://github.com/troypeters42/twinmac/actions/runs/41988729116/job/127117723028) | passed |
+
+### Final physical area
+
+Source: runs/wokwi/final/metrics.json. The chip uses the frozen 1x2 tile;
+these are ASIC layout measurements, separate from FPGA utilization.
+
+| Quantity | Final value |
+| --- | ---: |
+| Standard-cell area (design__instance__area__stdcell) | 20,835.0 um^2 |
+| Standard-cell count | 2,223 |
+| Core area | 34,255.4 um^2 |
+| Die area | 36,347.4 um^2 |
+| Die dimensions | 161.00 by 225.76 um |
+| Standard-cell utilization of core | 60.8226% |
+| Macro area / pad-cell area | 0 / 0 um^2 |
+
+Cell area counts the instantiated standard cells. Core and die area are
+layout envelopes, so they are different measurements. The unqualified
+instance-area metric is 34,255.4 um^2 after filling; use the explicit
+standard-cell metric for the 20,835.0 um^2 result. The requested placement
+density remains 60%; final measured utilization is 60.8226%.
+
+### What the standard-cell area contains
+
+The class breakdown comes from the same final/metrics.json. The 315
+timing-repair buffers and the tap cells are part of the 20,835 um^2.
+Fill cells are excluded from that standard-cell total.
+
+| Included class | Cells | Area (um^2), as reported |
+| --- | ---: | ---: |
+| Sequential cells | 168 | 4053.89 |
+| Multi-input combinational cells | 1202 | 12004 |
+| Inverters | 19 | 71.3184 |
+| Ordinary buffers | 1 | 5.0048 |
+| Timing-repair buffers | 315 | 2991.62 |
+| Clock buffers | 61 | 1136.09 |
+| Tap cells | 456 | 570.547 |
+| Antenna cells | 1 | 2.5024 |
+| Reported standard-cell total | 2223 | 20835.0 |
+
+Individual class areas are printed at limited precision; the reported
+total uses the tool's underlying values. The 4,060 fill cells occupy
+13,420.4 um^2 separately. Adding that fill area to the reported
+20,835.0 um^2 gives the filled instance area of 34,255.4 um^2.
+
+### Setup, hold, and all nine corners
+
+Source: runs/wokwi/55-openroad-stapostpnr/summary.rpt and the corresponding
+per-corner ws.max.rpt, ws.min.rpt, wns/tns reports, and final/metrics.json.
+The prefixes min, nom, and max select extracted interconnect RC corners.
+The remaining name identifies the process, temperature, and supply:
+ss_100C_1v60 is slow/100 C/1.60 V; ff_n40C_1v95 is fast/-40 C/1.95 V;
+tt_025C_1v80 is typical/25 C/1.80 V.
+
+| Corner | Setup worst slack (ns) | Hold worst slack (ns) | Max-slew count |
+| --- | ---: | ---: | ---: |
+| min_ss_100C_1v60 | +1.334934 | +0.867764 | 202 |
+| min_tt_025C_1v80 | +10.512190 | +0.326064 | 0 |
+| min_ff_n40C_1v95 | +14.027466 | +0.115010 | 0 |
+| nom_ss_100C_1v60 | +1.144626 | +0.880109 | 251 |
+| nom_tt_025C_1v80 | +10.396707 | +0.333243 | 0 |
+| nom_ff_n40C_1v95 | +13.951905 | +0.119370 | 0 |
+| max_ss_100C_1v60 | +0.932191 | +0.894136 | 303 |
+| max_tt_025C_1v80 | +10.267687 | +0.339036 | 11 |
+| max_ff_n40C_1v95 | +13.864521 | +0.120985 | 0 |
+
+Setup and hold WNS and TNS are 0.000000 ns at every corner, with zero
+setup/hold violating endpoints. Positive worst slack is different from
+WNS: WNS records only a negative result, so a passing corner has WNS=0.
+
+The setup signoff result at ss_100C_1v60 is limited by max RC:
++0.932191 ns. The hold signoff result at ff_n40C_1v95 is limited by min RC:
++0.115010 ns. Slow logic limits how late data may arrive; fast logic
+limits how early it can change after the receiving clock edge.
+
+### Maximum frequency from the measured slack
+
+The configured period is 20.000000 ns, or 50 MHz. The worst setup path
+in max_ss_100C_1v60 starts at core.controller.state[1] (mapped register
+cell _2554_) and ends at register _2446_, both on the rising edge of clk.
+The final gate-level netlist connects _2554_/Q to core.controller.state[1]. Its expanded-clock report includes the routed
+clock tree, skew, 0.25 ns clock uncertainty, clock reconvergence correction,
+and library setup time. The run also applies 5% timing derating.
+
+Keeping that implementation and those timing assumptions fixed, its
+positive slack is the amount by which the period can be reduced before
+this path reaches zero setup slack:
+
+```text
+T_min = T_current - setup_slack
+      = 20.000000000000000 - 0.932191239474114
+      = 19.067808760525886 ns
+
+f_max = 1 / T_min
+      = 1000 / 19.067808760525886
+      = 52.444411 MHz, approximately 52.44 MHz
+```
+
+The same corner's clock.rpt independently prints:
+
+```text
+clk period_min = 19.07 fmax = 52.44
+```
+
+This is a static-timing-derived limit for the routed ASIC under the stated
+constraints, not a measured silicon frequency or a new build at 52.44 MHz.
+CLOCK_PERIOD stays at 20 ns. It is also separate from the Boolean FPGA
+demo's 100 MHz result. The open max-slew violations below still limit
+how strongly this timing estimate can be treated as complete signoff.
+
+### Power at tt_025C_1v80
+
+The main power result uses nominal extracted RC at typical process,
+25 C, 1.80 V, and the actual 20 ns clock (50 MHz). Source:
+runs/wokwi/55-openroad-stapostpnr/nom_tt_025C_1v80/power.rpt and its
+sta.log power metrics. The table uses milliwatts; the raw report uses watts.
+
+| Component | Reported power (mW) |
+| --- | ---: |
+| Internal | 2.620613901 |
+| Switching | 2.026908100 |
+| Leakage | 0.000019274 |
+| Total | 4.647541326 |
+
+Total power is 0.0046475413255393505 W, or approximately 4.647541 mW.
+Leakage is approximately 19.274 nW. Clock-tree power is already included
+in the total; the report's Clock group is 0.5613171 mW and must not be
+added again. Macro and Pad groups both report zero.
+
+The same nominal-tt power report splits the total by cell group:
+
+| Power group | Share of total |
+| --- | ---: |
+| Sequential | 8.8% |
+| Combinational | 79.1% |
+| Clock | 12.1% |
+
+These shares describe the same total above; clock power is not an extra
+amount to add to it. Macro and pad power groups are both zero.
+
+The three RC variants at the requested typical PVT are:
+
+| tt_025C_1v80 RC corner | Total power (mW) |
+| --- | ---: |
+| min_tt_025C_1v80 | 4.597597 |
+| nom_tt_025C_1v80 | 4.647541 |
+| max_tt_025C_1v80 | 4.702079 |
+
+Do not label the unqualified final/metrics.json power__total as typical
+power: its 5.422246 mW is the maximum aggregate result, which matches
+max_ff_n40C_1v95. The requested nominal-tt number comes from its own report.
+
+### Power assumptions and what the estimate covers
+
+The final STA log reads the post-fill netlist, tt Liberty power models,
+nominal extracted SPEF, and the generic base.sdc. The clock report uses a
+20 ns period with rising/falling edges at 0/10 ns. The output load is
+0.033442 pF (33.442 fF); input/output delay constraints are 4 ns.
+STA_EXTRA_CORNER_TCL_FILE is null. The flow scripts contain no VCD/SAIF
+read or application-specific activity override for this run.
+
+The activity assumption is inferred from the flow scripts and documented
+OpenSTA defaults, not a measured per-pin activity dump. The default
+non-clock input activity is 0.1 transitions per minimum clock period,
+with a 0.5 probability of being high. At 20 ns that is 5 million
+transitions per second. OpenSTA propagates activity through the logic;
+it does not assume every internal node toggles at that same rate.
+See the [OpenSTA power commands](https://github.com/The-OpenROAD-Project/OpenSTA/blob/master/doc/Commands.md#report_power)
+and [LibreLane 3.0.14 corner script](https://github.com/librelane/librelane/blob/3.0.14/librelane/scripts/openroad/sta/corner.tcl).
+
+No gate-selection distribution, inference rate, weight-loading rate,
+reset schedule, or idle fraction was supplied. The estimate therefore
+is not a workload measurement of the Boolean board demo. It covers this
+block's modeled cells, internal clock tree, and modeled output loads;
+it is not FPGA board power or a complete Tiny Tapeout die/package power
+measurement. The final STA log reports physical fill/tap cells as black
+boxes without Liberty timing models, so their separate physical effects
+are not characterized by this activity-based cell-power result. No VCD-based
+power analysis or silicon power measurement is claimed.
+
+### Physical checks and remaining limitations
+
+The final metrics report zero detailed-route DRC errors, Magic DRC errors,
+LVS errors, and antenna-violating nets/pins. KLayout DRC is disabled in
+the LibreLane build by the template setting; the passing precheck runs
+its separate Magic and KLayout checks. A green build does not replace
+reading the actual per-corner timing table above.
+
+The overall timing summary still reports **303 open max-slew pin
+violations**, the maximum single-corner count at max_ss_100C_1v60. The
+row counts are not summed across corners because checks can repeat the
+same pins. max_tt has 11; min/nom_ss have 202/251. These are separate
+transition constraints, not setup/hold failures, and remain the accepted
+open limitation. The ten worst distinct nets are retained in the earlier
+"Open max-slew limitation" table. No timing exception or hardware change
+was made to remove or hide the violations.
+
+The final metric design__max_fanout_violation__count = 1 is also an
+**open item**, separate from the max-slew count above.
+
+Step 8's two FPGA LUT-packing warnings remain recorded, and its AND board
+row is still pending. Negative/large signed inputs and the specified
+accumulator extremes have simulation coverage at RTL and in the gl_test
+extreme vectors; the Boolean board bitstream does not exercise that full
+input range. Overall hardware acceptance is still open until Troy reports
+the board observations. Optional step 9 is skipped for now.
+
+### Verification, regression, and review status
+
+The area/power/timing numbers above come from the existing CI artifacts
+for 93ed933. The report verification checked artifact digests, corner
+values, power units, frequency arithmetic, and protected-file hashes.
+The gate-level results.xml reports one test with zero errors/failures;
+test/test.py includes the signed/extreme chip-pin vectors.
+
+For this approved documentation update, all seven sim/ testbenches were
+rerun in Vivado xsim 2024.2 on Nov 5, 2026, from 12:00:03 to 12:01:07
+Eastern (UTC-05:00). Each runner exited 0 and printed ALL TESTS PASSED.
+No expected values, tests, RTL, configuration, metadata, or FPGA files
+were changed. The FPGA bitstream and routed checkpoint are unchanged.
+
+| Testbench | Observed checks / inputs | Simulation finish (ns) | Failures | Runner exit |
+| --- | ---: | ---: | ---: | ---: |
+| tb_clamp | 131,072 | 131,072 | 0 | 0 |
+| tb_mac_unit | 8,062 | 40,246 | 0 | 0 |
+| tb_weight_sr | 376 | 2,486 | 0 | 0 |
+| tb_control_fsm | 1,096 | 5,476 | 0 | 0 |
+| tb_twinmac_core | 1,582,858 | 7,914,296 | 0 | 0 |
+| tb_twinmac | 18,056 | 337,111 | 0 | 0 |
+| tb_nexys_top | 50,440 | 152,560 | 0 | 0 |
+
+The clamp row counts all possible signed 17-bit inputs. MAC tests include
+1,000 random cases. The core completed 10,045 results, including 10,000
+random cases. The chip wrapper completed 35 results. The Nexys monitor
+checked 35 requested cases and 53 completions; one run was deliberately
+aborted by reset. These are simulation results, not board observations.
+
+Commands below were run from C:\Users\petet\twinmac. Each is followed
+by the actual last ten command-output lines. The unchanged runner retains
+raw tool logs and its combined verification logs under sim/logs/.
+
+#### tb_clamp
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_clamp -Sources @('src\clamp.sv','sim\tb_clamp.sv')
+```
+
+```text
+# xsim {tb_clamp_sim} -autoloadwcfg -runall
+Time resolution is 1 ps
+run -all
+Checked 131072 signed inputs (-65536 through 65535).
+ALL TESTS PASSED
+$finish called at time : 131072 ns : File "C:/Users/petet/TwinMac/sim/tb_clamp.sv" Line 56
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:00:28 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_clamp.run.log
+ALL TESTS PASSED
+```
+
+#### tb_mac_unit
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_mac_unit -Sources @('src\mac_unit.sv','sim\tb_mac_unit.sv')
+```
+
+```text
+Accumulator high: expected=32895 actual=32895
+Accumulator low: expected=-32640 actual=-32640
+Random cases completed: 1000 (two updates and two holds each).
+Accumulator checks completed: 8062; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 40246 ns : File "C:/Users/petet/TwinMac/sim/tb_mac_unit.sv" Line 210
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:00:34 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_mac_unit.run.log
+ALL TESTS PASSED
+```
+
+#### tb_weight_sr
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_weight_sr -Sources @('src\weight_sr.sv','sim\tb_weight_sr.sv')
+```
+
+```text
+All nine byte fields checked for both patterns.
+Extra-bit word: expected=b586fc01db2dff0279 actual=b586fc01db2dff0279
+Tracked rising edges: 217 shifts, 31 holds.
+Weight comparisons completed: 376; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 2486 ns : File "C:/Users/petet/TwinMac/sim/tb_weight_sr.sv" Line 190
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:00:40 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_weight_sr.run.log
+ALL TESTS PASSED
+```
+
+#### tb_control_fsm
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_control_fsm -Sources @('src\control_fsm.sv','sim\tb_control_fsm.sv')
+```
+
+```text
+Reset aborts checked in all six compute states, plus reset during done.
+Reset release with start high waited for the next rising edge.
+Runs: 64; reset-abort phases: 6; reset sequences: 8.
+Control-vector checks completed: 1096; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 5476 ns : File "C:/Users/petet/TwinMac/sim/tb_control_fsm.sv" Line 219
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:00:46 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_control_fsm.run.log
+ALL TESTS PASSED
+```
+
+#### tb_twinmac_core
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac_core -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','sim\tb_twinmac_core.sv')
+```
+
+```text
+Random cases completed: 10000; all 64 busy-start masks exercised.
+Reset aborts: six phases; all registers cleared; weights retained.
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 7914296 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac_core.sv" Line 312
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:00:54 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_twinmac_core.run.log
+ALL TESTS PASSED
+```
+
+#### tb_twinmac
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','sim\tb_twinmac.sv')
+```
+
+```text
+Reset, retained weights, zeroed inputs, and aborted run checked.
+Exact wrapper latency checked.
+Completed chip-pin results: 35.
+Chip-pin checks completed: 18056; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 337111 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac.sv" Line 281
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:01:00 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_twinmac.run.log
+ALL TESTS PASSED
+```
+
+#### tb_nexys_top
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_nexys_top -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','fpga\nexys_top.sv','sim\tb_nexys_top.sv')
+```
+
+```text
+Board reset during a run and complete preset reload checked.
+Requested cases verified: 35; complete weight words: 12.
+Observed computations: 53; starts: 54.
+FPGA pin/protocol checks: 50440; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 152560 ns : File "C:/Users/petet/TwinMac/sim/tb_nexys_top.sv" Line 303
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 12:01:07 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_nexys_top.run.log
+ALL TESTS PASSED
+```
+
+All seven tests passed before this documentation-only commit. The
+protected files were checked by SHA-256 and modification time against
+the pre-run snapshot. Only docs/rtl_notes.md is committed for step 10.
+The new commit's GitHub job results are reported after the push; the
+six-job table above identifies the measured 93ed933 run.
+
+Step 8 remains board test pending. Optional step 9 is skipped for now.
+The open slew/fanout items and FPGA warnings remain recorded. main is
+unchanged. No source, test, configuration, or FPGA implementation change
+is included in this commit.
