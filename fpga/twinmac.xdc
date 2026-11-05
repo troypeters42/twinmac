@@ -12,6 +12,8 @@ set_property PACKAGE_PIN F21 [get_ports {sw[1]}]
 set_property PACKAGE_PIN G21 [get_ports {sw[2]}]
 set_property PACKAGE_PIN G22 [get_ports {sw[3]}]
 set_property PACKAGE_PIN H17 [get_ports {sw[4]}]
+set_property PACKAGE_PIN J16 [get_ports {sw[5]}]
+set_property PACKAGE_PIN K13 [get_ports {sw[6]}]
 set_property IOSTANDARD LVCMOS12 [get_ports {sw[*]}]
 
 set_property PACKAGE_PIN T14 [get_ports {led[0]}]

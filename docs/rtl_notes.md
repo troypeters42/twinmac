@@ -2,10 +2,11 @@
 
 ## Current status
 
-- Updated Nov 5, 2026. Repository: C:\Users\petet\twinmac; working branch: rtl.
-- main remains at 162764d. All implementation commits below are on rtl.
+- Updated Nov 5, 2026. OLED worktree: C:\Users\petet\twinmac-oled; branch: oled.
+- Based on e8e710e. Original C:\Users\petet\twinmac and rtl remain unchanged.
+- main remains at 162764d. Prior implementation commits below are on rtl; this step 9 commit is on oled.
 - The final ASIC measurements come from 93ed933, GDS run 41988729116.
-  Its six GitHub jobs passed. This documentation commit preserves that design.
+  Its six GitHub jobs passed. The FPGA-only OLED work preserves that ASIC design.
 
 | Step | Commit | Current result |
 | --- | --- | --- |
@@ -16,9 +17,9 @@
 | 5: TwinMAC core | 1f75cbb | Complete; both accumulator-high paths checked |
 | 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
 | 7: required mutations | c105b87 | Complete; every required mutation was caught |
-| 8: Nexys Video demo | 93ed933 | Design approved; **board test pending** |
-| 9: optional OLED | No commit | **Skipped for now** at Troy's request |
-| 10: final notes and measurements | This commit, "Complete final RTL notes and verify all seven xsim testbenches" | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
+| 8: Nexys Video demo | 93ed933 | Troy reports board test passed; detailed observations not supplied |
+| 9: optional OLED | This commit on oled, from e8e710e | Approved for commit; simulation/build passed; **OLED board checks pending** |
+| 10: final notes and measurements | e8e710e | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
 
 The approved ASIC timing configuration is f71810b, between steps 7 and 8.
 It adds the 2 ns setup-repair margin and all-corner setup gate. The clock
@@ -40,7 +41,8 @@ the sticky done flag, even if the core ignores that pulse. Callers wait for
 completion before requesting another run.
 
 Python expected-value calculations inside cocotb tests are allowed; a separate
-Python model remains out of scope. Keep the OLED off until optional step 9.
+Python model remains out of scope. The plain step 8 image keeps the OLED off.
+Troy authorized the FPGA-only OLED additions documented in step 9 below.
 
 ## Answers to the nine AGENTS.md questions
 
@@ -1773,7 +1775,8 @@ Related violations: <none>
 
 These warnings remain an implementation limitation. Bitstream generation
 passed, but no claim that the warnings are harmless is made. Post-route
-functional simulation and board observations have not been performed.
+functional simulation has not been performed. Codex did not perform the
+board test; Troy's later general pass report is recorded below.
 
 ### What the AND board row checks
 
@@ -1786,8 +1789,9 @@ The AND row, with LD1 through LD6 off, is therefore the direct board
 check of the MAC 1 / clamp1 / h2 logic associated with PDRC-144 and
 PDRC-146. For inputs (0,0), (0,1), (1,0), and (1,1), the complete
 seven-bit result must be 0, 0, 0, and 1; checking only LD0 would miss
-unexpected upper result bits. This is a planned check, still board-test
-pending. These four cases are the only MAC 1 computations this bitstream can perform,
+unexpected upper result bits. Troy later reported that the board test
+worked, without supplying observations for individual checks. These four
+cases are the only MAC 1 computations this bitstream can perform,
 because its presets and Boolean inputs are fixed. A pass therefore covers MAC 1
 for this bitstream. It does not explain the warnings or carry over to a rebuild.
 
@@ -1835,18 +1839,21 @@ Inputs are written as (x1, x2), meaning (SW0, SW1). Each cell is expected LD0 / 
 
 Board observations and programming have not been performed by Codex.
 
-Step 8 is committed with **board test pending**. Troy must report all board
-observations before hardware acceptance. Optional step 9 is skipped for now;
-step 10 records the existing ASIC run.
+Step 8 was committed with its board test pending. On Nov 5, 2026, Troy
+reported that the board test worked and approved the OLED implementation
+for commit. Individual switch/LED observations were not supplied, so the
+checklist cells remain blank. OLED-specific checks are recorded separately
+in step 9. Step 10 records the existing ASIC run.
 
 ## Step 10: Final ASIC area, power, and maximum frequency
 
 ### Scope and final-run provenance
 
 Troy authorized this documentation step after the six jobs on 93ed933
-passed and max_ss setup remained +0.932191 ns. Optional step 9 is skipped
-for now. Step 8 still has a physical board test pending; these ASIC
-measurements do not complete that board acceptance.
+passed and max_ss setup remained +0.932191 ns. At that review, optional
+step 9 was skipped and step 8 still had a physical board test pending.
+These ASIC measurements did not establish board acceptance. Troy's later
+board-test report appears in step 8 and the approval record in step 9.
 
 The measured hardware/configuration is commit
 93ed9336332b825106a2125844bdb7f302f562f1 on rtl. Its ASIC source, tests,
@@ -2076,12 +2083,12 @@ was made to remove or hide the violations.
 The final metric design__max_fanout_violation__count = 1 is also an
 **open item**, separate from the max-slew count above.
 
-Step 8's two FPGA LUT-packing warnings remain recorded, and its AND board
-row is still pending. Negative/large signed inputs and the specified
-accumulator extremes have simulation coverage at RTL and in the gl_test
-extreme vectors; the Boolean board bitstream does not exercise that full
-input range. Overall hardware acceptance is still open until Troy reports
-the board observations. Optional step 9 is skipped for now.
+Step 8's two FPGA LUT-packing warnings remain recorded. Troy's later general
+board-test pass report does not supply individual AND-row observations.
+Negative/large signed inputs and the specified accumulator extremes have
+simulation coverage at RTL and in the gl_test extreme vectors; the Boolean
+board bitstream does not exercise that full input range. The subsequent
+OLED implementation and its hardware-check status are recorded in step 9.
 
 ### Verification, regression, and review status
 
@@ -2256,7 +2263,684 @@ the pre-run snapshot. Only docs/rtl_notes.md is committed for step 10.
 The new commit's GitHub job results are reported after the push; the
 six-job table above identifies the measured 93ed933 run.
 
-Step 8 remains board test pending. Optional step 9 is skipped for now.
-The open slew/fanout items and FPGA warnings remain recorded. main is
-unchanged. No source, test, configuration, or FPGA implementation change
-is included in this commit.
+At the e8e710e step 10 review, step 8 remained board test pending and
+optional step 9 was skipped. That documentation-only commit changed no
+source, test, configuration, or FPGA implementation. The later authorized
+OLED work is recorded below; ASIC slew/fanout items remain open.
+
+## Step 9: Optional OLED decision-map demo
+
+### Scope and review status
+
+Troy authorized this step after e8e710e, including FPGA-only bitmap memory,
+OLED SPI, the six map presets, and two extra switch pins. These additions
+apply only to the FPGA host. The ASIC sources, cocotb tests, info.yaml,
+src/config.json, and original Boolean presets are unchanged.
+
+Worktree: C:\Users\petet\twinmac-oled, branch oled, based on e8e710e.
+Troy approved this implementation for commit on Nov 5, 2026, after
+reporting that the existing board test worked. This commit records the
+OLED implementation on oled only. No branch was pushed. Codex did not
+program a board. The original rtl worktree and plain-demo bitstream remain
+unchanged. OLED-specific hardware observations have not been supplied, so
+the OLED checklist remains pending.
+
+The new files are fpga/oled_ctrl.sv, fpga/oled_text.sv, fpga/oled_map.sv,
+sim/oled_spi_monitor.sv, and sim/tb_oled_ctrl.sv. This step also changes
+fpga/nexys_top.sv, fpga/twinmac.xdc, sim/tb_nexys_top.sv, and these notes.
+The existing fpga/build.tcl and sim/run_xsim.ps1 required no changes.
+
+### What the hardware does
+
+The FPGA host still drives the real chip top through its byte/control pins.
+All state uses the one 100 MHz clock. Five-clock setup, high, and low
+phases preserve the existing pin protocol; OLED SPI is an output driven
+by clock enables, never a clock for internal registers.
+
+After reset or a gate change, the host loads the map preset and runs all
+1024 input pairs, x1 and x2 each from 0 through 31. x1 changes fastest.
+Each completed chip result writes one bitmap bit, lit when y >= 16.
+The host does not calculate a substitute neuron result. A gate change
+during an active sweep is queued: the host finishes the sweep, then
+sweeps the latest selected gate. A change before the sweep's first run
+reloads the latest preset before that run. CPU RESET aborts a run/sweep;
+release starts a complete fresh sweep.
+
+After the last pixel, the host reloads the unchanged Boolean preset and
+resumes switch-driven runs. Only the first completed Boolean run publishes
+the new map and its gate label. The renderer snapshots the mode, gate,
+latched Boolean inputs, and latest completed Boolean result at frame start.
+Y comes from chip_uo, never a truth-table lookup. A switch change appears
+after the corresponding completed run and a subsequent frame snapshot.
+
+led is still assigned directly from chip_uo. During a map sweep the LEDs
+show intermediate map computations, so LD1-LD6 may light briefly. Once
+Boolean operation resumes, LD0 again shows the gate result and LD1-LD6
+are off. This temporary sweep behavior is part of this OLED demo.
+
+The host registers hold its state, five-cycle counter, weight word and
+bit index, map coordinates, loaded gate, run inputs, and completed Boolean
+values. Combinational logic selects presets, drives the chip pins, and
+compares chip_y against 16. A rising edge advances the host state; the
+RESULT edge stores a real chip result or writes its map pixel.
+
+oled_map stores 128 bytes (1024 bits). It has a clocked one-bit write and
+combinational byte read. Screen row is 31-x2, page is row/8, and bit is
+row%8; x1 selects column 0..31. Thus (0,0) is bottom left, x1 increases
+rightward, and x2 upward. No bitmap reset is needed because every bit is
+replaced before publication. New sweeps wait until a current user frame
+finishes, and no fresh user frame starts while the map is invalid. The
+initial forced blank frame reads no bitmap data. This prevents partial
+maps from becoming visible within a transmitted frame.
+
+oled_text is a combinational byte renderer with registered frame metadata.
+Columns 0..31 show the map; 32..39 are blank; text begins at column 40.
+Pages 0, 1, and 2 contain GATE, X1/X2, and Y; page 3 has no text. Glyphs
+use 8-by-8 cells with five-column strokes. The digit 2 is included because
+the requested X2 label needs it; the handoff's shorter font list omitted it.
+SW[6:5]=01 renders all pixels, 10 renders a one-pixel border, and 00/11
+render the map and text. Mode changes take effect at a frame boundary.
+
+### Presets and independently calculated map counts
+
+The 72-bit field order remains b,c,a,b2,w22,w21,b1,w12,w11. The map
+hidden sums are h1=clamp(x1+x2) and h2=clamp(x1+x2-31).
+For the 0..31 input range, h1 never exceeds 62. The table gives the
+integer-math oracle; the actual FPGA obtains every pixel from the chip.
+
+| Select | Gate | Map preset | Lit pixels | Region with y >= 16 |
+| --- | --- | --- | ---: | --- |
+| 000 | AND | 72'h00_01_00_E1_01_01_00_01_01 | 136 | x1+x2 >= 47 |
+| 001 | OR | 72'h00_FF_01_E1_01_01_00_01_01 | 888 | x1+x2 >= 16 |
+| 010 | XOR | 72'h00_FE_01_E1_01_01_00_01_01 | 752 | 16 <= x1+x2 <= 46 |
+| 011 | NAND | 72'h1F_FF_00_E1_01_01_00_01_01 | 888 | x1+x2 <= 46 |
+| 100 | NOR | 72'h1F_01_FF_E1_01_01_00_01_01 | 136 | x1+x2 <= 15 |
+| 101 | XNOR | 72'h1F_02_FF_E1_01_01_00_01_01 | 272 | x1+x2 <= 15 or >= 47 |
+| 110, 111 | AND aliases | Same as AND | 136 each | x1+x2 >= 47 |
+
+The new switch pins are SW5/J16 and SW6/K13, LVCMOS12. All existing pin
+assignments are retained. These match the [Digilent master XDC](https://github.com/Digilent/digilent-xdc/blob/master/Nexys-Video-Master.xdc).
+All seven switches pass through two synchronizer stages.
+
+### OLED power, SPI, reset, and button operation
+
+The OLED controller has its own two-clock FPGA power-on reset, independent
+of CPU RESET. Its state, timer, SPI serializer, and power pins are registers.
+Its next-state, command-byte, and frame-byte selections are combinational.
+The routed checkpoint confirms oled_vdd_reg and oled_vbat_reg are FDPE
+registers with INIT=1, the inactive power levels. CPU RESET resets the
+chip/host and invalidates the map without changing either OLED power pin.
+
+BTNC passes through two synchronizing flip-flops and a 20 ms debounce
+counter. A newly stable high level toggles the requested OLED state once.
+A held button does not repeat. Press and release once to shut down; press
+and release again to restart. A request during a frame waits for its end.
+
+The production timing defaults at 100 MHz are 100000 clocks per 1 ms,
+10000000 clocks for the 100 ms VBAT delay, 5000000 clocks for the 50 ms
+display-on delay, and 350000000 clocks for shutdown's 3.5 seconds.
+BUTTON_DEBOUNCE_CYCLES defaults to 2000000. These literal defaults are
+checked separately from the accelerated simulation instances.
+
+Power-up drives VDD low and waits 1 ms, raises RES for 1 ms, sends AE,
+holds RES low for 1 ms, then high for 1 ms. It sends these command bytes
+with D/C low, in this exact order:
+
+    A8 1F 8D 14 D9 F1 81 0F A0 C0 DA 02 20 00
+
+It then drives VBAT low, waits 100 ms, transmits a blank frame, sends AF,
+and waits 50 ms before user frames. Every frame has command header
+21 00 7F 22 00 03 followed by exactly 512 data bytes with D/C high.
+SPI is MSB first, idles high, changes data on falling edges, and samples
+on rising edges. A ten-clock half-period gives 5 MHz at 100 MHz.
+
+Shutdown completes any current frame, sends AE, drives VBAT high, waits
+3.5 seconds, drives RES low, then drives VDD high on the following clock.
+Before reprogramming or removing power, press/release BTNC once and wait
+at least four seconds after release, even if the display goes dark sooner.
+The dark image after AE alone does not prove the power sequence finished.
+
+### Verification independence and coverage
+
+The controller test and separate SPI monitor were written before the RTL.
+The integration test retains the existing Boolean and pin-protocol checks;
+only the 0-or-1 byte restriction is limited to Boolean runs. Later checks
+strengthened frame-boundary handling and unequal X1/X2 text snapshots.
+No expected value or check was weakened to obtain a pass.
+
+oled_spi_monitor decodes every byte at the external SPI pins. It checks
+commands, D/C, headers, 512-byte frame length, blank data, edge timing,
+power ordering, and shutdown timing without reading DUT state or ROMs.
+The integration test independently calculates each map with signed integer
+neuron arithmetic and checks all 1024 pixels for each gate and alias.
+Its font oracle uses row bitmaps rather than the renderer's column table.
+Frame payloads are compared after controls settle and two frame completions
+allow an older snapshot to finish. Transport/power checks cover every byte,
+including transitions. All maps happen to be symmetric in x1/x2; a separate
+pin-level scan-order assertion is what detects a swapped-axis stimulus.
+
+The accelerated instances use distinct delay values: 40 clocks for 1 ms,
+80 for VBAT wait, 60 for display-on wait, and 100 for shutdown. The button
+uses five debounce clocks. SPI stays at the real 5 MHz. Test-only default
+instances check the unmodified production values as literal integers.
+
+Coverage includes all eight gate codes, all Boolean cases, both unequal
+input text values, both bring-up patterns, the normal alias, gate changes
+during loading/running/sweeping, reset during a sweep, CPU RESET with the
+OLED active, button bounce, shutdown during a frame, safe restart, and
+continued chip/LED operation while the OLED is off. Every sweep run is
+subject to the five-clock pin checks. The integrated run completes 14 maps,
+67795 Boolean results, and 37 requested Boolean cases. No physical display
+orientation or board behavior has been observed.
+
+### Actual xsim regression on the final source
+
+All eight tests ran in Vivado xsim 2024.2 from this worktree on Nov 5, 2026.
+Every runner exited 0 with ALL TESTS PASSED and zero failures.
+The seven existing tests were rerun as well as the new controller test.
+
+| Testbench | Observed coverage | Finish time | Result |
+| --- | --- | --- | --- |
+| tb_clamp | 131072 signed inputs | 131072 ns | PASS, exit 0 |
+| tb_mac_unit | 8062 accumulator checks; 1000 random cases | 40246 ns | PASS, exit 0 |
+| tb_weight_sr | 376 comparisons | 2486 ns | PASS, exit 0 |
+| tb_control_fsm | 1096 checks | 5476 ns | PASS, exit 0 |
+| tb_twinmac_core | 1582858 checks; 10045 results; 10000 random cases | 7914296 ns | PASS, exit 0 |
+| tb_twinmac | 18056 checks; 35 completed results | 337111 ns | PASS, exit 0 |
+| tb_oled_ctrl | 1031 controller + 871083 SPI/power checks | 4256470 ns | PASS, exit 0 |
+| tb_nexys_top | 10601368 pin/protocol + 8644114 SPI/power checks | 45560670 ns | PASS, exit 0 |
+
+Exact commands and final ten command-output lines follow. Complete raw and
+combined logs remain in sim/logs and are copied into the review packet.
+
+#### tb_clamp
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_clamp -Sources @('src\clamp.sv','sim\tb_clamp.sv')
+```
+
+```text
+# xsim {tb_clamp_sim} -autoloadwcfg -runall
+Time resolution is 1 ps
+run -all
+Checked 131072 signed inputs (-65536 through 65535).
+ALL TESTS PASSED
+$finish called at time : 131072 ns : File "C:/Users/petet/twinmac-oled/sim/tb_clamp.sv" Line 56
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:16:45 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_clamp.run.log
+ALL TESTS PASSED
+```
+
+#### tb_mac_unit
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_mac_unit -Sources @('src\mac_unit.sv','sim\tb_mac_unit.sv')
+```
+
+```text
+Accumulator high: expected=32895 actual=32895
+Accumulator low: expected=-32640 actual=-32640
+Random cases completed: 1000 (two updates and two holds each).
+Accumulator checks completed: 8062; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 40246 ns : File "C:/Users/petet/twinmac-oled/sim/tb_mac_unit.sv" Line 210
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:16:53 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_mac_unit.run.log
+ALL TESTS PASSED
+```
+
+#### tb_weight_sr
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_weight_sr -Sources @('src\weight_sr.sv','sim\tb_weight_sr.sv')
+```
+
+```text
+All nine byte fields checked for both patterns.
+Extra-bit word: expected=b586fc01db2dff0279 actual=b586fc01db2dff0279
+Tracked rising edges: 217 shifts, 31 holds.
+Weight comparisons completed: 376; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 2486 ns : File "C:/Users/petet/twinmac-oled/sim/tb_weight_sr.sv" Line 190
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:17:00 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_weight_sr.run.log
+ALL TESTS PASSED
+```
+
+#### tb_control_fsm
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_control_fsm -Sources @('src\control_fsm.sv','sim\tb_control_fsm.sv')
+```
+
+```text
+Reset aborts checked in all six compute states, plus reset during done.
+Reset release with start high waited for the next rising edge.
+Runs: 64; reset-abort phases: 6; reset sequences: 8.
+Control-vector checks completed: 1096; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 5476 ns : File "C:/Users/petet/twinmac-oled/sim/tb_control_fsm.sv" Line 219
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:17:07 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_control_fsm.run.log
+ALL TESTS PASSED
+```
+
+#### tb_twinmac_core
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac_core -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','sim\tb_twinmac_core.sv')
+```
+
+```text
+Random cases completed: 10000; all 64 busy-start masks exercised.
+Reset aborts: six phases; all registers cleared; weights retained.
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 7914296 ns : File "C:/Users/petet/twinmac-oled/sim/tb_twinmac_core.sv" Line 312
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:17:16 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_twinmac_core.run.log
+ALL TESTS PASSED
+```
+
+#### tb_twinmac
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','sim\tb_twinmac.sv')
+```
+
+```text
+Reset, retained weights, zeroed inputs, and aborted run checked.
+Exact wrapper latency checked.
+Completed chip-pin results: 35.
+Chip-pin checks completed: 18056; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 337111 ns : File "C:/Users/petet/twinmac-oled/sim/tb_twinmac.sv" Line 281
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:17:22 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_twinmac.run.log
+ALL TESTS PASSED
+```
+
+#### tb_oled_ctrl
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_oled_ctrl -Sources @('fpga\oled_ctrl.sv','sim\oled_spi_monitor.sv','sim\tb_oled_ctrl.sv')
+```
+
+```text
+Time resolution is 1 ps
+run -all
+Power-ups: 2; safe shutdowns: 1; user frames: 3.
+OLED controller checks: 1031; SPI/power checks: 871083; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 4256470 ns : File "C:/Users/petet/twinmac-oled/sim/tb_oled_ctrl.sv" Line 79
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:17:30 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_oled_ctrl.run.log
+ALL TESTS PASSED
+```
+
+#### tb_nexys_top
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_nexys_top -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','fpga\oled_ctrl.sv','fpga\oled_map.sv','fpga\oled_text.sv','fpga\nexys_top.sv','sim\oled_spi_monitor.sv','sim\tb_nexys_top.sv')
+```
+
+```text
+Completed maps: 14; Boolean results: 67795; requested cases: 37.
+FPGA pin/protocol checks: 10601368; SPI/power checks: 8644114; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 45560670 ns : File "C:/Users/petet/twinmac-oled/sim/tb_nexys_top.sv" Line 522
+run: Time (s): cpu = 00:00:00 ; elapsed = 00:00:51 . Memory (MB): peak = 195.672 ; gain = 0.000
+exit
+INFO: xsimkernel Simulation Memory Usage: 31104 KB (Peak: 31104 KB), Simulation CPU Usage: 42280 ms
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 14:18:34 2026...
+Verification log: C:\Users\petet\twinmac-oled\sim\logs\tb_nexys_top.run.log
+ALL TESTS PASSED
+```
+
+### Required OLED mutation results
+
+Each mutation changed one file in a disposable temporary copy, using the
+unchanged final tests. All eight failed an intended assertion with runner
+exit 1. None was accepted merely for a compile error or watchdog timeout.
+The unmutated worktree passed before mutation testing. No mutated source
+was copied into this worktree. Full diffs, commands, and logs are included
+in the review packet.
+
+| Mutation | Testbench | First actual assertion | Result |
+| --- | --- | --- | --- |
+| Swap map x1/x2 pin stimulus | tb_nexys_top | Mismatch (map stimulus x1 fast, x2 slow) at 11676000 | Detected, exit 1 |
+| Use threshold 17 instead of 16 | tb_nexys_top | Mismatch (frame gate=0 mode=0 byte=16 expected=01 got=00) at 2546490000 | Detected, exit 1 |
+| Store map with vertically flipped rows | tb_nexys_top | Mismatch (frame gate=0 mode=0 byte=16 expected=01 got=00) at 2546490000 | Detected, exit 1 |
+| Flip one bit in AND map bias E1 to E0 | tb_nexys_top | Mismatch (all 72 bits form an approved preset) at 10836000 | Detected, exit 1 |
+| Invert displayed Boolean Y digit | tb_nexys_top | Mismatch (frame gate=0 mode=0 byte=312 expected=00 got=3e) at 2546490000 | Detected, exit 1 |
+| CPU RESET cuts VDD while VBAT is on | tb_nexys_top | OLED mismatch (VDD off after VBAT wait and reset low), cycle=3704947 phase=9 | Detected, exit 1 |
+| Enable VBAT before initialization completes | tb_oled_ctrl | OLED mismatch (VBAT on only after all init commands), cycle=328 phase=5 | Detected, exit 1 |
+| Skip the 3.5 second discharge wait | tb_oled_ctrl | OLED mismatch (3.5 s VBAT-off wait before reset low), cycle=254818 phase=11 | Detected, exit 1 |
+
+Disposable copies and their complete logs are under:
+
+```text
+C:\Users\petet\AppData\Local\Temp\TwinMAC-Step9-Work\mutations
+```
+
+### Actual FPGA build and what it proves
+
+The unchanged build script ran once on the final source and exited 0 with
+BUILD PASSED. It synthesized, placed, routed, checked timing, wrote the
+checkpoint, and wrote the OLED bitstream. No timing exceptions, extra
+pipeline, ASIC source edit, or retry after a timing failure was needed.
+
+```powershell
+& 'C:\Xilinx\Vivado\2024.2\bin\vivado.bat' -mode batch -source fpga/build.tcl -log fpga/build/vivado.log -journal fpga/build/vivado.jou
+```
+
+| Measure | Routed OLED build |
+| --- | ---: |
+| Part | xc7a200tsbg484-1 |
+| Clock | 100 MHz, 10 ns, one clock |
+| Worst setup slack | +0.720 ns |
+| Setup TNS / failing endpoints | 0 / 0 |
+| Worst hold slack | +0.045 ns |
+| Hold THS / failing endpoints | 0 / 0 |
+| Total LUTs | 728 |
+| Logic LUTs | 696 |
+| LUTRAMs (included in total LUTs) | 32 |
+| Flip-flops | 384 |
+| Occupied slices | 248 |
+| BRAM / DSP | 0 / 0 |
+| IOB / BUFGCTRL | 24 / 1 |
+| DRC errors / warnings | 0 / 2 |
+
+Worst setup starts at chip/core/controller/FSM_onehot_state_reg[2]/C
+and ends at chip/core/mac0/acc_reg[16]/D. Data-path delay is 9.330 ns,
+with 4.095 ns logic and 5.235 ns routing; clock skew is -0.024 ns.
+The complete expanded clock path and hold paths are in the packet.
+
+The routed checkpoint retains bits [4:0] of both chip/x1_reg_reg and
+chip/x2_reg_reg. Bits [7:5] are removed. Unlike the earlier Boolean-only
+image, this image exercises positive 5-bit inputs and the new map presets.
+It still does not exercise negative or full-range signed inputs in hardware.
+The original full-range RTL and extreme gate-level gl_test results remain
+separate evidence; these FPGA results do not establish full 8-bit arithmetic
+at 100 MHz. Troy reports that the existing board test worked. No
+OLED-specific hardware result is claimed without its checklist observations.
+
+An FPGA-only use_dsp=yes instance attribute requests DSP mapping without
+changing ASIC RTL. Vivado nevertheless reports zero DSP blocks in both
+synthesis and routed utilization. The log does not state why, so no mapping
+reason is claimed. Actual resource counts take precedence over that hint.
+AMD documents the attribute and its propagation in [UG901](https://docs.amd.com/r/2024.2-English/ug901-vivado-synthesis/Synthesis-Attribute-Propagation-Rules).
+
+The hierarchy table below comes from the routed checkpoint. Total rows
+include their descendants, and LUT counts are placement/mapping results,
+not functional module sizes: Vivado can move/combine logic across hierarchy.
+The chip has 166 flip-flops; the FPGA host/display together have 218, total
+384. The bitmap is distributed RAM rather than 1024 individual flip-flops.
+
+```text
++--------------------+----------------------------+------------+------------+---------+------+-----+--------+--------+------------+
+|      Instance      |           Module           | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP Blocks |
++--------------------+----------------------------+------------+------------+---------+------+-----+--------+--------+------------+
+| nexys_top          |                      (top) |        728 |        696 |      32 |    0 | 384 |      0 |      0 |          0 |
+|   (nexys_top)      |                      (top) |         99 |         99 |       0 |    0 | 120 |      0 |      0 |          0 |
+|   bitmap           |                   oled_map |         42 |         10 |      32 |    0 |   0 |      0 |      0 |          0 |
+|   chip             | tt_um_troypeters42_twinmac |        226 |        226 |       0 |    0 | 166 |      0 |      0 |          0 |
+|     (chip)         | tt_um_troypeters42_twinmac |         11 |         11 |       0 |    0 |  27 |      0 |      0 |          0 |
+|     core           |               twinmac_core |        215 |        215 |       0 |    0 | 139 |      0 |      0 |          0 |
+|       (core)       |               twinmac_core |          1 |          1 |       0 |    0 |  25 |      0 |      0 |          0 |
+|       clamp0       |                      clamp |          0 |          0 |       0 |    0 |   0 |      0 |      0 |          0 |
+|       clamp1       |                    clamp_0 |          0 |          0 |       0 |    0 |   0 |      0 |      0 |          0 |
+|       controller   |                control_fsm |        104 |        104 |       0 |    0 |   8 |      0 |      0 |          0 |
+|       mac0         |                   mac_unit |         37 |         37 |       0 |    0 |  17 |      0 |      0 |          0 |
+|       mac1         |                 mac_unit_1 |         27 |         27 |       0 |    0 |  17 |      0 |      0 |          0 |
+|       weight_store |                  weight_sr |         50 |         50 |       0 |    0 |  72 |      0 |      0 |          0 |
+|   display_ctrl     |                  oled_ctrl |        357 |        357 |       0 |    0 |  90 |      0 |      0 |          0 |
+|   render           |                  oled_text |          6 |          6 |       0 |    0 |   8 |      0 |      0 |          0 |
++--------------------+----------------------------+------------+------------+---------+------+-----+--------+--------+------------+
+* Note: The sum of lower-level cells may be larger than their parent cells total, due to cross-hierarchy LUT combining
+```
+
+### Packing warnings and external I/O timing limits
+
+The exact IDs PDRC-144 and PDRC-146 do not appear in this build. The same
+C6/C5 and D6/D5 warning families remain under PDRC-136 and PDRC-138 at
+different sites. Renumbering does not establish a fix or show they are
+harmless. Their full text is:
+
+```text
+PDRC-136#1 Warning
+SLICE_PairEqSame_C6C5_WARN
+Luts C6LUT and C5LUT in use in site SLICE_X15Y86 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-138#1 Warning
+SLICE_PairEqSame_D6D5_WARN
+Luts D6LUT and D5LUT in use in site SLICE_X9Y83 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+```
+
+A read-only inspection of the existing routed checkpoint found no named
+logical cells on these physical LUT BELs. At SLICE_X15Y86, the physical
+C6 equation is O6=(A6+~A6)*(0), and C5 is O5=(A2). At SLICE_X9Y83,
+D6 is O6=(A6+~A6)*(1), and D5 is O5=(A1). The A6 pin-net queries
+returned no net at both sites. The packet includes this raw evidence;
+it does not establish hardware behavior or waive either warning.
+
+The timing report has nine inputs without input delays: btnc, cpu_resetn,
+and sw[0] through sw[6]. Fourteen outputs have no output delays: led[0]
+through led[7] and the six OLED pins. No false paths were added. Thus the
+positive setup/hold results establish the constrained internal timing;
+they do not prove an external I/O timing budget, eliminate asynchronous
+metastability, or replace board checks. The synchronizers and SPI/power
+simulation checks address behavior, with physical validation still pending.
+
+### Build identity and protection of existing work
+
+All 12 exact build inputs below retain their pre-build SHA-256 and file
+modification time after the build. This includes the unchanged build script.
+The reviewed source therefore matches the source used for this bitstream.
+
+| Build input | SHA-256 of exact local bytes |
+| --- | --- |
+| src/clamp.sv | 264eb6a5729053d4835a1de05f98720b49f1537c5aa225a057368d5e99e24431 |
+| src/control_fsm.sv | 253b161f8303bfe7df546fa5fe26740b246b0ad92caa7d4e53502de89b49eca8 |
+| src/mac_unit.sv | d86df558365821814f8c0a0d94b1521b09ed70c71ded43741fd6bfb216ef7f9b |
+| src/tt_um_troypeters42_twinmac.sv | bb94e0e5e915bb0916d40957d9fb97c02337d4d519d719d9bad7a92b6eb9c6bc |
+| src/twinmac_core.sv | 3b04ccaaec0b890f7564b43b1330c88b54afcd3046bf73077b8d0c189ea7e2b9 |
+| src/weight_sr.sv | f8daa892427aee201106b62b9a2d8a50a4cce3d835a5c268a3b764981832422e |
+| fpga/nexys_top.sv | 00be46ebb9a57ace945762514d9fa5c2369000784e17bbdfeefb28d7f1ee7bab |
+| fpga/oled_ctrl.sv | 6f675714675231d8fb27f90667fbf331f36aa6e92317aea416778a8cf0d261ab |
+| fpga/oled_map.sv | 560efd76970bdf9a0f12fc90bfe2899519d186cf43806f35e0b59c0333f44e1d |
+| fpga/oled_text.sv | 2b2af268526dd34e7f1be3ae71a3c3c8bafe4be6a0b8c40e6937463d0124e7d7 |
+| fpga/twinmac.xdc | 7c75f43f2a08a4c5fe246cfb025ec8bd609046e56dda8e84f0abc300d3e5a53f |
+| fpga/build.tcl | 2eb5601a83484e2181027605d143387673d1a2a533ac7f18b25adba4fa1f9062 |
+
+OLED bitstream: C:\Users\petet\twinmac-oled\fpga\build\nexys_top.bit
+
+```text
+92bc134db12484854d3db658e53356d00f36530afd86b7d552c42ca0aaae3c35
+```
+
+Size: 9730758 bytes. Routed checkpoint SHA-256:
+
+```text
+b74cecc288b12a54b7b342e66d044c5c817dbe9bfadb962b55e8a50355cfbf07
+```
+
+The 14 protected files under src/, test/, and info.yaml match
+e8e710e in canonical Git content, including src/config.json. Windows Git
+checked them out with CRLF; the manifest records raw checkout hashes and
+LF Git-content hashes separately. No protected file was edited to alter
+its line endings. Their raw checkout hashes also remain unchanged.
+
+All 52 snapshotted original tracked/build files retain their exact
+bytes and modification times. The original worktree is clean; rtl remains
+e8e710e and main remains 162764d. The original plain bitstream remains:
+
+```text
+C:\Users\petet\twinmac\fpga\build\nexys_top.bit
+SHA-256: 28671ec5ddfc03038b709f643b2ff6664eec0a6069a8f4544085cc45916d760b
+```
+
+The original step 8 four-case MAC 1 coverage and +0.606 ns timing result
+describe that earlier plain image. They must not be carried over to this
+new image. This OLED image uses different map weights and a 0..31 sweep.
+Its own board acceptance checklist follows. Every observation is pending.
+
+### OLED board acceptance checklist
+
+All results below are predicted. No board has been programmed or observed by Codex.
+Record what you actually see in the blanks. Use this checklist only after reviewing
+and accepting the OLED build. The original plain-demo bitstream remains separate.
+
+1. With the board off, set JP4 to JTAG.
+2. Connect 12 V power to J21 and micro-USB from PROG (J12) to the computer.
+3. Power on with SW8 and confirm the OLED stays dark. If it lights up, stop. Do not
+   reprogram it or power it off until the running image's shutdown step is identified.
+
+OLED dark before programming: ______  Date / observer: ____________________
+
+#### Program the reviewed OLED image
+
+- [ ] Leave CPU RESET and BTNC released. Set gate SW[4:2]=000 (AND), SW0=0, SW1=0.
+- [ ] Set SW[6:5]=01: SW6 off, SW5 on, for the first bring-up stage.
+- [ ] Manually program C:\Users\petet\twinmac-oled\fpga\build\nexys_top.bit.
+- [ ] Confirm the selected file is from twinmac-oled, not the retained plain build
+      at C:\Users\petet\twinmac\fpga\build\nexys_top.bit.
+- [ ] Allow one second for the power sequence and first map/frame to settle.
+
+Reviewed OLED bitstream SHA-256:
+
+```text
+92bc134db12484854d3db658e53356d00f36530afd86b7d552c42ca0aaae3c35
+```
+
+Selected file / hash checked: ______________________________________________
+Programming result and first visible image: _______________________________
+
+#### Three bring-up stages, in order
+
+| Stage | SW6 | SW5 | Predicted display | What I observed |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 1 | Every pixel of the 128-by-32 display lit | __________________ |
+| 2 | 1 | 0 | A one-pixel border; interior dark | __________________ |
+| 3 | 0 | 0 | Left map and the three text rows below | __________________ |
+
+For stage 3 with AND and inputs (0,0), the predicted text starts at column 40:
+
+```text
+GATE: AND
+X1=0 X2=0
+Y=0
+```
+
+- [ ] Verify the map is 32 columns wide at the left, followed by an eight-column gap.
+- [ ] Verify the text uses three rows; the fourth text row is blank.
+- [ ] Verify SW[6:5]=11 gives the same normal display as 00, then return to 00.
+
+Text / spacing / normal-alias observations: _______________________________
+
+#### Six real-chip decision maps
+
+x1 increases to the right; x2 increases upward. (0,0) is the map's bottom left.
+A pixel is lit for y >= 16 using the map preset and a real completed chip run.
+Set each gate below and allow one second to settle. Switch changes can briefly
+show map values on the LEDs during the sweep; judge Boolean LED results afterward.
+
+| SW[4:2] | Gate | Predicted lit region | Predicted lit pixels | Observed shape / orientation |
+| --- | --- | --- | ---: | --- |
+| 000 | AND | x1+x2 >= 47; upper-right triangle | 136 | __________________ |
+| 001 | OR | x1+x2 >= 16; one boundary | 888 | __________________ |
+| 010 | XOR | 16 <= x1+x2 <= 46; band with two boundaries | 752 | __________________ |
+| 011 | NAND | x1+x2 <= 46 | 888 | __________________ |
+| 100 | NOR | x1+x2 <= 15; lower-left triangle | 136 | __________________ |
+| 101 | XNOR | x1+x2 <= 15 or x1+x2 >= 47; two corner regions | 272 | __________________ |
+| 110 | AND alias | Same as 000 | 136 | __________________ |
+| 111 | AND alias | Same as 000 | 136 | __________________ |
+
+If a map is mirrored or upside down, record it and stop for review; the source
+uses the specified A0/C0 orientation and has not been verified on this board.
+Observed map orientation / any mismatch: __________________________________
+
+#### Live Boolean text and LEDs
+
+SW0 is x1 and SW1 is x2. The Y text must match the chip's latest completed Boolean
+result and LD0. LD1 through LD6 should be off after a sweep settles. LD7 should
+look steady during repeated computations. Changing only SW0/SW1 changes the text
+and Boolean result; the decision map remains the selected gate's map.
+
+Each cell below is predicted Y / my observed Y (check both text and LD0):
+
+| Gate | (0,0) | (0,1) | (1,0) | (1,1) |
+| --- | --- | --- | --- | --- |
+| AND | 0 / ___ | 0 / ___ | 0 / ___ | 1 / ___ |
+| OR | 0 / ___ | 1 / ___ | 1 / ___ | 1 / ___ |
+| XOR | 0 / ___ | 1 / ___ | 1 / ___ | 0 / ___ |
+| NAND | 1 / ___ | 1 / ___ | 1 / ___ | 0 / ___ |
+| NOR | 1 / ___ | 0 / ___ | 0 / ___ | 0 / ___ |
+| XNOR | 1 / ___ | 0 / ___ | 0 / ___ | 1 / ___ |
+
+- [ ] Explicitly check X1=1 X2=0 and X1=0 X2=1 in the text.
+- [ ] Change gates without CPU RESET; the final map, gate label, and result must agree.
+- [ ] Hold CPU RESET while the OLED is on. LEDs should clear, but the OLED should
+      keep its power and last displayed frame. Release it and allow a new sweep;
+      the normal live display should return without an OLED power cycle.
+
+CPU RESET / gate-change / LED observations: ________________________________
+
+#### BTNC shutdown and restart
+
+- [ ] During normal display, press BTNC once for about 50 ms and release it.
+- [ ] Wait at least FOUR SECONDS AFTER RELEASE, even if the OLED goes dark sooner.
+      The controller finishes the current frame, sends AE, turns VBAT off, waits
+      3.5 seconds, holds reset low, and then turns VDD off. Darkness alone does
+      not mean that discharge wait has finished. Do not double-press the button.
+- [ ] Confirm the OLED remains dark after that wait. Boolean LED computations
+      should continue while the OLED is off.
+- [ ] To test restart, press/release BTNC once again and allow one second. The
+      complete power-up sequence should restore the latest map and Boolean text.
+
+Shutdown wait / dark-state / continuing LEDs: ______________________________
+Restart observations: ____________________________________________________
+
+#### Before any reprogramming or power-off
+
+If shutdown has already completed and the OLED remains off, leave it off;
+pressing BTNC again would restart it. Otherwise, with the OLED running:
+
+Press BTNC once for about 50 ms, release, and wait at least FOUR SECONDS.
+Confirm the OLED remains dark. Only then reprogram the FPGA or turn power off.
+If the display does not stay dark, stop; do not reprogram or power off until
+its shutdown state is understood.
+
+Final shutdown performed / wait / observed result: _________________________
+All three bring-up stages confirmed by: ____________________________________
+All six maps and 24 Boolean cases confirmed by: ____________________________
+
+### Step 9 approval and commit
+
+On Nov 5, 2026, Troy wrote: "Board test worked and I'm ready for OLED
+implementation and commit". This authorizes committing the reviewed OLED
+implementation. The board report is recorded as a general pass, without
+inventing individual observations or marking unreported OLED stages as
+complete. The OLED bring-up, map/text, reset, and shutdown/restart checks
+remain pending explicit hardware observations.
+
+The 12 build inputs and both bitstreams were rechecked against the review
+manifest before commit and remain unchanged. All 16 FPGA/test/runner text
+files match the review packet. The existing eight passing xsim logs and
+eight detected mutation results were checked again; no source or test was
+changed after those runs, so no additional simulation or rebuild was needed.
+
+The approved files are committed on oled only. rtl and main remain at
+e8e710e and 162764d, respectively; no push or merge is included. No Icarus,
+Yosys, new ASIC build, or new gate-level run is claimed for this FPGA-only
+addition. The original ASIC signoff limitations remain unchanged.
