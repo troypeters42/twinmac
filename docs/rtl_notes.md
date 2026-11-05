@@ -6,7 +6,9 @@
 - Repository: C:\Users\petet\twinmac.
 - Working branch: rtl, created locally from origin/main at 162764d.
 - Step 1 is complete; Troy reproduced the passing test and approved it on Nov 4, 2026.
-- Step 2 has not started. Troy authorized pushing rtl for step 1 review.
+- Step 1 is committed and pushed on rtl.
+- Step 2 passed xsim and was approved by Troy on Nov 4, 2026.
+- Step 3 has not started.
 
 ## Confirmed working decisions
 
@@ -153,3 +155,127 @@ ALL TESTS PASSED
 AGENTS.md now requires input wire logic and a 1ns/1ps timescale in every
 SystemVerilog design file, and schedules deletion of src/project.v in step 6.
 The existing clamp already satisfies both coding rules. Step 2 has not started.
+
+## Step 2: MAC unit
+
+### What hardware this describes
+
+src/mac_unit.sv describes one signed multiplier, an adder, a selector for the
+adder's starting value, and a 17-bit accumulator register named acc.
+
+The multiplier takes two signed 8-bit operands and produces a signed 16-bit
+product. The product is sign-extended to 17 bits by copying its sign bit.
+The signed 8-bit bias is also sign-extended to 17 bits by repeating its sign bit.
+This preserves negative values when they enter the wider adder.
+
+The product, extended values, and next_acc are combinational signals. They
+describe wires and arithmetic, not stored values or extra pipeline stages.
+The always_comb block calculates next_acc continuously:
+
+- With first high, next_acc is bias plus product.
+- With first low, next_acc is the existing acc plus product. Bias is ignored.
+
+Only acc stores state. At each rising clock edge, en decides whether acc
+takes next_acc. With en low, acc holds its value even if first, bias, or
+the operands change. A low rst_n clears acc to zero immediately, without
+waiting for a clock edge, and takes priority over en and first. Releasing
+reset alone does not perform an accumulation.
+
+For example, first=1, bias=7, and operands 2 and 3 load 13 at a rising edge.
+A subsequent enabled edge with first=0 and operands -4 and 5 changes acc to
+13 + (-20) = -7. A disabled edge leaves -7 stored.
+
+There is no clamp in this block: negative and large sums remain available
+for the later clamp step. There is one multiplier and no pipeline register
+between it and acc. All input ports use input wire logic, and the file has
+the required 1ns/1ps simulation timescale.
+
+### Why the accumulator is 17 bits
+
+The largest required two-product sum is 127 + 16384 + 16384 = 32895.
+A signed 16-bit number stops at 32767, so it would wrap on this valid case.
+A signed 17-bit register covers -65536 through 65535 and accommodates both
+the high corner 32895 and the low corner -128 - 16256 - 16256 = -32640.
+
+### How the test works
+
+sim/tb_mac_unit.sv drives inputs on falling clock edges, then checks that acc
+is unchanged before the next rising edge. After the rising edge, it allows
+the register assignment to settle and checks the new value. The expected
+accumulator is calculated from integer stimulus values and the previous
+expected value, never from DUT output or internal signals. Case inequality
+treats unknown output bits as mismatches.
+
+Directed checks cover:
+
+- Asynchronous reset between rising edges, reset priority with en and first
+  asserted, reset with en low, enabled reset release, and resuming from zero.
+- Holding acc with both values of first while inputs and bias change.
+- first replacing an existing sum and accumulation ignoring the bias.
+- Positive, negative, and zero products, including all specified product corners.
+- Bias sign extension, product sign extension, and both accumulator extremes.
+
+The random seed is 0x54574D32. Each of 1000 cases uses random signed bytes
+for bias and operands, performs one first update and one accumulation, and
+inserts two disabled cycles with changed inputs. Each case starts a new sum,
+so the reference stays within the specified two-product neuron range.
+This gives 2000 random enabled updates and 2000 random hold cycles.
+A simulation watchdog rejects a run that exceeds 100000 ns.
+
+### Actual verification
+
+Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_mac_unit -Sources @('src\mac_unit.sv', 'sim\tb_mac_unit.sv')
+```
+
+The initial run passed. After external review, apply_reset was strengthened
+to leave en unchanged while rst_n rises and until the reset-release check
+finishes. Only then is en cleared, before the next rising clock edge.
+This checks that reset release alone cannot update acc even with en high.
+MAC RTL, expected values, and the number of comparisons were unchanged.
+
+The fresh xsim run exited with code 0: 1000 random cases and 8062 accumulator
+checks completed with zero failures. The last 10 console output lines were:
+
+```text
+Accumulator high: expected=32895 actual=32895
+Accumulator low: expected=-32640 actual=-32640
+Random cases completed: 1000 (two updates and two holds each).
+Accumulator checks completed: 8062; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 40246 ns : File "C:/Users/petet/TwinMac/sim/tb_mac_unit.sv" Line 210
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 19:49:07 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_mac_unit.run.log
+ALL TESTS PASSED
+```
+
+The raw and combined logs are retained locally as ignored generated files:
+
+- sim/logs/tb_mac_unit.run.log
+- sim/logs/tb_mac_unit.xvlog.log
+- sim/logs/tb_mac_unit.xelab.log
+- sim/logs/tb_mac_unit.xsim.log
+- sim/logs/tb_mac_unit.console.log
+
+### Decisions and review status
+
+The testbench was written before the RTL. Expected values remain unchanged.
+External review identified a gap: reset release was checked only with en low.
+The test now preserves en through the release check and clears it afterward.
+No existing check was removed or weakened. The simulation runner required no
+changes. Signed extensions are explicit, and only acc is a register.
+Random tests deliberately use two products per sum, matching the frozen core
+schedule and avoiding unspecified longer accumulation sequences.
+
+Only xsim was run locally for this step. The Icarus, Yosys, Verilator, and
+mutation results supplied in the external review are reviewer-reported and
+were not reproduced in this session. Vivado synthesis, timing, chip-flow builds,
+and physical board operation remain unverified.
+
+There are no open questions for step 2. The three files changed are
+src/mac_unit.sv, sim/tb_mac_unit.sv, and docs/rtl_notes.md. Troy approved
+step 2 for commit on Nov 4, 2026, after the reset-release test fix and passing
+xsim rerun. Step 3 has not started.
