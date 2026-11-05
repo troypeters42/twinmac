@@ -8,7 +8,7 @@
 - Step 1 is complete; Troy reproduced the passing test and approved it on Nov 4, 2026.
 - Step 1 is committed and pushed on rtl.
 - Step 2 passed xsim and was approved by Troy on Nov 4, 2026.
-- Step 3 has not started.
+- Step 3 passed xsim and was approved by Troy on Nov 4, 2026.
 
 ## Confirmed working decisions
 
@@ -279,3 +279,135 @@ There are no open questions for step 2. The three files changed are
 src/mac_unit.sv, sim/tb_mac_unit.sv, and docs/rtl_notes.md. Troy approved
 step 2 for commit on Nov 4, 2026, after the reset-release test fix and passing
 xsim rerun. Step 3 has not started.
+
+## Step 3: Weight shift register
+
+### What hardware this describes
+
+src/weight_sr.sv describes 72 stored bits named weights. Its only clock is clk.
+At a rising clock edge with load high, each old bit moves one position toward
+bit 71, old bit 71 falls out, and sdi enters bit 0. At a rising edge with load
+low, all 72 bits hold their previous values.
+
+load is a clock enable, not a second clock. Changing load or sdi between
+rising edges does not change the stored word. There is no combinational
+arithmetic, no multiplier, no FSM, no bit counter, and no extra pipeline.
+The concatenation in the clocked assignment describes the connections
+between the stored bits and the serial input.
+
+There is deliberately no reset port or initial value on the register.
+Callers must load all 72 bits before the first computation; startup contents
+must not be assumed. The register does not know whether the core is busy,
+so its caller must also avoid shifting during computation.
+
+The word contains raw bits. The core will interpret the nine byte slices
+as signed values later; the shift register itself performs no signed math.
+
+### Why most significant bit goes first
+
+The first incoming bit starts in position 0. After the remaining 71 shifts
+it reaches position 71. Sending bit 71 first and bit 0 last therefore
+places the complete word in the required order after 72 enabled edges.
+
+The test-only patterns have these expected final fields:
+
+| Bits | Field | First pattern | Second pattern |
+| --- | --- | --- | --- |
+| 71:64 | b | A5 | 5A |
+| 63:56 | c | 3C | C3 |
+| 55:48 | a | 81 | 7E |
+| 47:40 | b2 | FF | 00 |
+| 39:32 | w22 | 12 | ED |
+| 31:24 | w21 | 69 | 96 |
+| 23:16 | b1 | 00 | FF |
+| 15:8 | w12 | 7E | 81 |
+| 7:0 | w11 | C3 | 3C |
+
+These are diagnostic test words; the frozen gate presets are unchanged.
+Each word has nine distinct bytes. The second word complements the first,
+so every stored position is checked at both binary values.
+
+### How the test works
+
+sim/tb_weight_sr.sv first shifts 72 zero bits through the public ports.
+Only after that does it compare the full word with zero. This establishes
+a known state without assuming a hardware reset or assigning DUT internals.
+
+For a subsequent word, the expected contents after k enabled shifts are:
+
+```text
+((starting_word << k) | (target_word >> (72 - k))) limited to 72 bits
+```
+
+The reference uses fixed stimulus words and the number of bits sent, never
+DUT output. Paused cycles do not advance k. The final nine byte fields are
+also compared independently with the literal values in the table above.
+Case inequality catches unknown bits as failures.
+
+The first diagnostic word is sent most significant bit first, with two
+disabled cycles before each byte. Those pauses change sdi between 0 and 1.
+The second word is sent with load held high for 72 consecutive rising edges
+and replaces the first word without a zero flush between them.
+
+Each normal cycle checks the old value after falling-edge input changes
+and the expected value after the following rising edge. A separate check
+pulses load high and low and changes sdi entirely while clk stays high,
+verifying that neither signal acts as a clock or opens a transparent latch.
+Additional disabled cycles verify that a stored nonzero word holds.
+
+After the second word, an extra 1 bit must produce B5_86_FC_01_DB_2D_FF_02_79.
+This expected constant comes from doubling the second word, adding 1, and
+keeping 72 bits. It checks continued shifting beyond a complete word.
+The module does not automatically stop or restart after 72 bits.
+
+The run tracks 217 enabled rising edges: 72 zero-fill shifts, two 72-bit
+diagnostic words, and one extra bit. It also tracks 31 disabled rising edges.
+The 376 comparisons include both whole-word and individual-byte checks.
+A watchdog rejects a simulation that exceeds 10000 ns.
+
+### Actual verification
+
+Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_weight_sr -Sources @('src\weight_sr.sv', 'sim\tb_weight_sr.sv')
+```
+
+The first run exited with code 0. All 376 comparisons passed with zero
+failures. The last 10 lines of the command's console output were:
+
+```text
+All nine byte fields checked for both patterns.
+Extra-bit word: expected=b586fc01db2dff0279 actual=b586fc01db2dff0279
+Tracked rising edges: 217 shifts, 31 holds.
+Weight comparisons completed: 376; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 2486 ns : File "C:/Users/petet/TwinMac/sim/tb_weight_sr.sv" Line 190
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 22:10:04 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_weight_sr.run.log
+ALL TESTS PASSED
+```
+
+The actual raw and combined logs are retained locally as ignored files:
+
+- sim/logs/tb_weight_sr.run.log
+- sim/logs/tb_weight_sr.xvlog.log
+- sim/logs/tb_weight_sr.xelab.log
+- sim/logs/tb_weight_sr.xsim.log
+- sim/logs/tb_weight_sr.console.log
+
+### Decisions and review status
+
+The testbench was written before the RTL. Expected values and checks were
+unchanged after the test run. The existing runner required no changes.
+All design inputs use input wire logic, and the required timescale is present.
+No reset, framing, counter, busy guard, or extra clock was added.
+
+Only xsim was run for step 3. No synthesis, timing, Icarus, Yosys, mutation,
+gate-level, or board result is claimed.
+
+The three changed files are src/weight_sr.sv, sim/tb_weight_sr.sv, and
+docs/rtl_notes.md. There are no open questions. Troy approved step 3 on
+Nov 4, 2026, and authorized its commit and push on rtl together with step 2.
+Step 4 has not started.
