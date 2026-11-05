@@ -859,3 +859,283 @@ Troy explicitly authorized committing and pushing step 6 to rtl after
 chip-pin xsim passes, so the required GitHub jobs can run before review.
 This is the step 6 exception to the usual pre-commit review checkpoint.
 Step 7 has not started. No merge or push to main is authorized.
+
+## Step 7: Required mutation tests
+
+### What this checks
+
+Mutation testing deliberately breaks one feature on a temporary copy and
+checks whether an existing test notices. A caught mutation confirms that
+the test can distinguish the intended behavior from that particular bug.
+It does not prove every possible bug is covered.
+
+This step adds no hardware. The clamp remains combinational; each MAC
+retains a signed 17-bit accumulator register. Weight storage, the control
+state register, hidden/output registers, and wrapper synchronizers keep
+their existing behavior. The production RTL and tests are unchanged from
+b4fcc704d34361fdf102bca7fa9e289b9938c253.
+
+### Method and passing baselines
+
+Tool: Vivado xsim 2024.2. Each mutation used a fresh copy of the six design
+files, the required testbenches, and the unchanged sim/run_xsim.ps1.
+The retained local workspace is:
+
+```text
+C:\Users\petet\AppData\Local\Temp\TwinMAC-Step7-1d647272
+```
+
+The baseline and seven mutation folders are independent. The core
+testbench copies contain three additional diagnostic $display messages:
+after the MAC 0 accumulator-high corner, before random cases, and after
+random cases. They print the existing failure counter. They add no checks,
+change no expected values, and consume no simulation time or random values.
+The same diagnostic messages are present in the passing baseline copy.
+
+All four baseline runs exited 0 and printed ALL TESTS PASSED:
+
+| Testbench | Actual passing coverage |
+| --- | --- |
+| tb_clamp | 131072 signed inputs |
+| tb_mac_unit | 8062 accumulator checks; zero failures |
+| tb_twinmac_core | 10045 results; 1582858 checks; zero failures |
+| tb_twinmac | 35 results; 18056 checks; zero failures |
+
+Every mutated run compiled, elaborated, and reached a numeric testbench
+FAILED verdict. The runner exited 1 for all ten mutation/test combinations.
+Compiler errors, elaboration errors, and watchdog timeouts did not count
+as detected mutations.
+
+### Mutation results
+
+| Temporary folder | Deliberate source change | Required test and actual verdict |
+| --- | --- | --- |
+| upper_clamp | Remove the value > 127 branch in clamp.sv | tb_clamp: FAILED: 64897; core: FAILED: 1185440 |
+| lower_clamp | Remove the value < 0 branch in clamp.sv | tb_clamp: FAILED: 65024; core: FAILED: 1378482 |
+| accumulator_16 | Change mac_unit.acc from signed [16:0] to signed [15:0]; leave the adder and core wires unchanged | core: FAILED: 324 |
+| swap_w11_w12 | Read w11 from weights[15:8] and w12 from weights[7:0] | core: FAILED: 840668 |
+| unsigned_multiply | Cast both operands with $unsigned before multiplication | tb_mac_unit: FAILED: 6788; core: FAILED: 1567310 |
+| sign_extend_h1 | Replace {1'b0, h1} with {h1[6], h1} in the second-pass operand | core: FAILED: 769964 |
+| sticky_start | Replace the start-branch flag clear with done_flag <= done_flag; retain reset | tb_twinmac: FAILED: 34 |
+
+The 16-bit mutation first fails after the golden gate cases, during the
+required MAC 0 high corner. There are 9 failures by that corner's checkpoint.
+All 324 failures occur before random testing; random testing adds none.
+The directed overflow checks remain essential.
+
+Swapping w11/w12 adds 840499 failures during the random phase
+(840668 minus 169). Sign-extending h1 adds 769325 random-phase failures
+(769807 minus 482). The unsigned-multiplier mutation adds 1566004
+random-phase core failures (1567043 minus 1039).
+
+### Exact commands
+
+Run these commands from the relevant baseline or mutation folder under
+the retained workspace. The table above identifies which tests each
+mutation requires. All four commands also ran on the baseline.
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_clamp -Sources @('src\clamp.sv','sim\tb_clamp.sv')
+```
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_mac_unit -Sources @('src\mac_unit.sv','sim\tb_mac_unit.sv')
+```
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac_core -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','sim\tb_twinmac_core.sv')
+```
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','sim\tb_twinmac.sv')
+```
+
+### Actual failing-output excerpts
+
+These excerpts retain the first two mismatch messages, phase checkpoints
+where present, and final counters/verdict in their original order.
+Every run below returned runner exit code 1.
+
+upper_clamp / tb_clamp
+
+```text
+Mismatch: value=128 expected=127 actual=0
+Mismatch: value=129 expected=127 actual=1
+Checked 131072 signed inputs (-65536 through 65535).
+FAILED: 64897
+```
+
+upper_clamp / tb_twinmac_core
+
+```text
+MUTATION CHECKPOINT: after MAC0 high corner; failures=0
+Mismatch (after compute edge) at 9156000: expected=3f4080003f800a actual=3f40800000800a
+Mismatch (before compute edge) at 9161000: expected=3f4080003f800a actual=3f40800000800a
+MUTATION CHECKPOINT: before random cases; failures=164
+MUTATION CHECKPOINT: after random cases; failures=1185289
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 1185440.
+FAILED: 1185440
+```
+
+lower_clamp / tb_clamp
+
+```text
+Mismatch: value=-65535 expected=0 actual=1
+Mismatch: value=-65534 expected=0 actual=2
+Checked 131072 signed inputs (-65536 through 65535).
+FAILED: 65024
+```
+
+lower_clamp / tb_twinmac_core
+
+```text
+Mismatch (after compute edge) at 786000: expected=00007fffc00000 actual=00007fffc07f00
+Mismatch (before compute edge) at 791000: expected=00007fffc00000 actual=00007fffc07f00
+MUTATION CHECKPOINT: after MAC0 high corner; failures=120
+MUTATION CHECKPOINT: before random cases; failures=120
+MUTATION CHECKPOINT: after random cases; failures=1378247
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 1378482.
+FAILED: 1378482
+```
+
+accumulator_16 / tb_twinmac_core
+
+```text
+Mismatch (after compute edge) at 6776000: expected=403f8000010102 actual=c03f8000010102
+Mismatch (before compute edge) at 6781000: expected=403f8000010102 actual=c03f8000010102
+MUTATION CHECKPOINT: after MAC0 high corner; failures=9
+MUTATION CHECKPOINT: before random cases; failures=324
+MUTATION CHECKPOINT: after random cases; failures=324
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 324.
+FAILED: 324
+```
+
+swap_w11_w12 / tb_twinmac_core
+
+```text
+MUTATION CHECKPOINT: after MAC0 high corner; failures=0
+Mismatch (after compute edge) at 11506000: expected=00050000004080 actual=00078000004080
+Mismatch (before compute edge) at 11511000: expected=00050000004080 actual=00078000004080
+MUTATION CHECKPOINT: before random cases; failures=169
+MUTATION CHECKPOINT: after random cases; failures=840668
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 840668.
+FAILED: 840668
+```
+
+unsigned_multiply / tb_mac_unit
+
+```text
+Mismatch (after rising edge): expected=-16256 actual=16256 at 56000
+Mismatch (127 times -128): expected=-16256 actual=16256 at 56000
+Accumulator checks completed: 8062; failures: 6788.
+FAILED: 6788
+```
+
+unsigned_multiply / tb_twinmac_core
+
+```text
+Mismatch (after compute edge) at 2016000: expected=00008000410102 actual=00808000410102
+Mismatch (before compute edge) at 2021000: expected=00008000410102 actual=00808000410102
+MUTATION CHECKPOINT: after MAC0 high corner; failures=860
+MUTATION CHECKPOINT: before random cases; failures=1039
+MUTATION CHECKPOINT: after random cases; failures=1567043
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 1567310.
+FAILED: 1567310
+```
+
+sign_extend_h1 / tb_twinmac_core
+
+```text
+Mismatch (after compute edge) at 6796000: expected=003f80003f8002 actual=ffff80003f8002
+Mismatch (before compute edge) at 6801000: expected=003f80003f8002 actual=ffff80003f8002
+MUTATION CHECKPOINT: after MAC0 high corner; failures=5
+MUTATION CHECKPOINT: before random cases; failures=482
+MUTATION CHECKPOINT: after random cases; failures=769807
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 769964.
+FAILED: 769964
+```
+
+sticky_start / tb_twinmac
+
+```text
+Mismatch (start clears flag before result completes): expected=00 actual=80 at 23611000
+Mismatch (start clears flag before result completes): expected=00 actual=80 at 24611000
+Completed chip-pin results: 35.
+Chip-pin checks completed: 18056; failures: 34.
+FAILED: 34
+```
+
+The complete vendor logs, combined run logs, and console output remain in
+each folder's sim/logs directory. manifest.json records the exact changed
+source text and source lists; summary.json contains the concise results.
+SHA-256 checks confirm every production source, testbench, and runner still
+matches the baseline. The mutation step changes only this notes section.
+
+### Original step 6 chip-build evidence and timing finding
+
+The requested screenshots are authentic captures of the original GDS run,
+41968284611 at e3ef3e8. Its gds, precheck, gl_test, and viewer jobs are green.
+The separate RTL test run is 41968284500. The GitHub Summary page does not
+publish area or timing numbers; those come from its GDS_logs artifact,
+ID 13388732507. Local evidence is retained under:
+
+```text
+C:\Users\petet\AppData\Local\Temp\TwinMAC-Step7-Review\original-GDS-logs\runs\wokwi
+```
+
+The original run's final/metrics.json and post-route summary report:
+
+| Measurement | Actual value |
+| --- | --- |
+| Die dimensions | 161.000 by 225.760 um |
+| Die area | 36347.4 um^2 |
+| Reported standard-cell area (design__instance__area__stdcell) | 20868.8 um^2 |
+| Standard-cell utilization | 60.9212% |
+| Configured clock period | 20 ns (50 MHz) |
+| Setup slack, nom_tt_025C_1v80 | +9.0447 ns |
+| Worst setup slack, max_ss_100C_1v60 | -1.6856 ns |
+| Setup violations at max_ss_100C_1v60 | 5 |
+| Worst hold slack, min_ff_n40C_1v95 | +0.1138 ns |
+| Hold violations across reported corners | 0 |
+| Max-slew violations at max_ss_100C_1v60 | 364 |
+
+The die dimensions are also explicit in final/def: units are 1000 database
+units per micron, with DIEAREA (0,0) to (161000,225760).
+
+This is a real register-to-register setup failure at the required slow
+corner. The first worst-corner path starts at _2554_, the controller state
+register, and ends at _2446_. The report's final lines are:
+
+```text
+                                             20.665323   data required time
+                                            -22.350903   data arrival time
+---------------------------------------------------------------------------------------------
+                                             -1.685580   slack (VIOLATED)
+```
+
+The resolved 68-checker-setupviolations/config.json explains why a green
+job did not prove slow-corner signoff:
+
+```json
+{
+  "CLOCK_PERIOD": 20,
+  "TIMING_VIOLATION_CORNERS": ["*tt*"],
+  "SETUP_VIOLATION_CORNERS": null
+}
+```
+
+The checker selects typical-process corners; the slow ss corner has
+negative setup slack in the detailed reports. No clock period, density,
+RTL, workflow, or timing exception was changed while gathering this evidence.
+
+This is an initial chip-build measurement, not final project signoff.
+AGENTS.md requires stopping and asking Troy when LibreLane timing fails.
+Troy approved step 7 on Nov 5 and authorized up to four configuration
+experiments on a separate timing-test branch. The experiments preserve RTL,
+tests, CLOCK_PERIOD, and PL_TARGET_DENSITY_PCT. Step 8 has not started.

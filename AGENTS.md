@@ -404,6 +404,8 @@ Work down this table in order, and don't move on until the current row passes. V
 | Board | Nexys Video | Every gate and input, set by hand | Troy reports that LD0 matches the truth table |
 | Signoff | GitHub **gds** and **precheck** | Setup, hold, DRC, LVS, antenna checks, and Tiny Tapeout precheck | Zero violations |
 
+A green gds job doesn't prove slow-corner setup. Read the per-corner table in the post-route summary.rpt.
+
 If the **viewer** job fails only on the `rtl` branch, report it and carry on, because it publishes the results page. It must pass after the merge to `main`.
 
 **Required mutations:** Make each change on a temporary copy, run the listed test, confirm it fails, and record the failure in `docs/rtl_notes.md`. Don't commit the mutated code.
