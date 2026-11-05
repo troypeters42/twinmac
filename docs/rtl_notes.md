@@ -7,8 +7,9 @@
 - Working branch: rtl, created locally from origin/main at 162764d.
 - Step 1 is complete; Troy reproduced the passing test and approved it on Nov 4, 2026.
 - Step 1 is committed and pushed on rtl.
-- Step 2 passed xsim and was approved by Troy on Nov 4, 2026.
-- Step 3 passed xsim and was approved by Troy on Nov 4, 2026.
+- Step 2 is committed as fec9360 and pushed on rtl.
+- Step 3 is committed as 4489ce1 and pushed on rtl.
+- Step 4 passed xsim and was approved by Troy on Nov 4, 2026.
 
 ## Confirmed working decisions
 
@@ -411,3 +412,147 @@ The three changed files are src/weight_sr.sv, sim/tb_weight_sr.sv, and
 docs/rtl_notes.md. There are no open questions. Troy approved step 3 on
 Nov 4, 2026, and authorized its commit and push on rtl together with step 2.
 Step 4 has not started.
+
+## Step 4: Control FSM
+
+### What hardware this describes
+
+src/control_fsm.sv schedules the six compute operations. It has seven states:
+IDLE and STEP1 through STEP6. A typed three-bit enum names those states.
+The stored state and done flag are the only registers in this module.
+
+The always_comb block calculates both next_state and the datapath controls.
+All controls receive zero defaults, then the selected state sets the required
+ones. Every branch assigns next_state, including a default that returns an
+invalid state to IDLE. These assignments describe combinational decode logic
+and do not add pipeline registers or latches.
+
+The control table is:
+
+| State | mac0_en | mac1_en | mac_first | operand_sel | hidden_en | output_en |
+| --- | --- | --- | --- | --- | --- | --- |
+| IDLE | 0 | 0 | 0 | 0 | 0 | 0 |
+| STEP1 | 1 | 1 | 1 | 0 | 0 | 0 |
+| STEP2 | 1 | 1 | 0 | 1 | 0 | 0 |
+| STEP3 | 0 | 0 | 0 | 0 | 1 | 0 |
+| STEP4 | 1 | 0 | 1 | 2 | 0 | 0 |
+| STEP5 | 1 | 0 | 0 | 3 | 0 | 0 |
+| STEP6 | 0 | 0 | 0 | 0 | 0 | 1 |
+
+start affects next_state only while IDLE. During the six active states,
+the FSM advances once per rising edge regardless of start. A start held
+high through a run can begin another run when it is sampled in IDLE.
+
+At each rising edge, the state register takes next_state. done takes the
+comparison of the old state with STEP6. Nonblocking assignments use the
+pre-edge state, so exiting STEP6 sets done while the new state becomes IDLE.
+A low rst_n asynchronously clears the state to IDLE and done to zero.
+
+### How the edge timing works
+
+E0 is the rising edge that accepts start while IDLE. The control signals
+after each edge prepare the operation sampled by the datapath at the next
+edge:
+
+| Edge | State after edge | done after edge | Meaning |
+| --- | --- | --- | --- |
+| E0 | STEP1 | 0 | Prepare the first bias-plus-product updates |
+| E1 | STEP2 | 0 | Step 1 executes; prepare second products |
+| E2 | STEP3 | 0 | Step 2 executes; prepare hidden-register loads |
+| E3 | STEP4 | 0 | Hidden values load; prepare output bias and first product |
+| E4 | STEP5 | 0 | Step 4 executes; prepare the second output product |
+| E5 | STEP6 | 0 | Step 5 executes; prepare the output-register load |
+| E6 | IDLE | 1 | Output loads; done rises for one clock cycle |
+| E7 | STEP1 or IDLE | 0 | Accept a new start or continue waiting |
+
+This step tests the control signals and their timing. The datapath will
+be connected and verified in step 5; no arithmetic result is claimed here.
+done is a registered pulse, not a separate state and not the combinational
+decode of STEP6. Controls are all idle during the done-high cycle.
+
+### How the test works
+
+sim/tb_control_fsm.sv uses literal seven-bit control rows transcribed from
+the specification. A separate expected done bit makes an eight-bit vector.
+The expected sequence is supplied by the stimulus, never by DUT state or
+hierarchical references. Case inequality treats unknown output bits as
+failures. All seven control bits and done are compared together.
+
+Inputs are driven on falling clock edges. The previous expected vector
+is checked before the next rising edge, then the new vector is checked
+after the rising edge has settled. This checks both clocked advancement
+and the absence of an immediate control or done change when start changes.
+
+Each ordinary run begins at E0 and checks all following edges through E6.
+All 64 possible start patterns across E1 through E6 are exercised. Mask
+bit 0 drives start at E1 and bit 5 at E6. The patterns include isolated
+busy starts, no busy starts, and continuously asserted start.
+
+Consecutive ordinary runs accept start at E7, immediately following the
+previous completion. The test also checks done clearing with no new start
+and continued idle behavior. A short start pulse entirely between clock
+edges must not launch a run.
+
+Reset is asserted between rising edges in each compute state, including
+STEP6 before it could generate done. start stays high through two clock
+edges under reset and through reset release. The release check expects
+IDLE controls and done low until the next rising clock edge accepts start.
+Each aborted run is followed by a complete run, checking that no stale
+completion appears. Reset is also checked while done is already high.
+
+The summary counts 64 ordinary runs, six reset-abort phases, and eight
+reset sequences: initial reset, six compute-state interruptions, and a
+reset during done. The 1096 checks each compare the full eight-bit vector.
+A watchdog rejects a simulation that exceeds 20000 ns.
+
+### Actual verification
+
+Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_control_fsm -Sources @('src\control_fsm.sv', 'sim\tb_control_fsm.sv')
+```
+
+The first run exited with code 0. All 1096 control-vector checks passed
+with zero failures. The last 10 lines of console output were:
+
+```text
+Reset aborts checked in all six compute states, plus reset during done.
+Reset release with start high waited for the next rising edge.
+Runs: 64; reset-abort phases: 6; reset sequences: 8.
+Control-vector checks completed: 1096; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 5476 ns : File "C:/Users/petet/TwinMac/sim/tb_control_fsm.sv" Line 219
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 22:24:55 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_control_fsm.run.log
+ALL TESTS PASSED
+```
+
+The actual raw and combined logs are retained locally as ignored files:
+
+- sim/logs/tb_control_fsm.run.log
+- sim/logs/tb_control_fsm.xvlog.log
+- sim/logs/tb_control_fsm.xelab.log
+- sim/logs/tb_control_fsm.xsim.log
+- sim/logs/tb_control_fsm.console.log
+
+### Decisions and review status
+
+The testbench was written before the RTL. Expected rows and checks were
+unchanged after the first test run. The existing runner required no changes.
+Combinational controls share the next-state block, with explicit defaults
+and a unique case. State and done share one asynchronously reset clocked
+block. No extra state, busy port, clock, or pipeline was introduced.
+
+Only xsim was run for step 4. No synthesis, timing, Icarus, Yosys, mutation,
+gate-level, or board result is claimed. Invalid-state recovery is present
+in RTL but was not tested by forcing internal state.
+
+Step 3 was committed as 4489ce1, then rtl was pushed and verified on GitHub
+at that commit, including step 2 commit fec9360. Local and remote main
+remained at 162764db71c8e561e3e8b9399a30a42f3c584fcd.
+
+The three step 4 changes are src/control_fsm.sv, sim/tb_control_fsm.sv, and
+docs/rtl_notes.md. There are no open questions. Troy approved step 4 on
+Nov 4, 2026, and authorized its commit and push on rtl. Step 5 has not started.
