@@ -4,7 +4,7 @@
 
 - Updated Nov 5, 2026. OLED worktree: C:\Users\petet\twinmac-oled; branch: oled.
 - Based on e8e710e. Original C:\Users\petet\twinmac and rtl remain unchanged.
-- main remains at 162764d. Prior implementation commits below are on rtl; this step 9 commit is on oled.
+- main remains at 162764d. Prior implementation commits below are on rtl; OLED commit 91e0286 is on oled.
 - The final ASIC measurements come from 93ed933, GDS run 41988729116.
   Its six GitHub jobs passed. The FPGA-only OLED work preserves that ASIC design.
 
@@ -18,7 +18,7 @@
 | 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
 | 7: required mutations | c105b87 | Complete; every required mutation was caught |
 | 8: Nexys Video demo | 93ed933 | Troy reports board test passed; detailed observations not supplied |
-| 9: optional OLED | This commit on oled, from e8e710e | Approved for commit; simulation/build passed; **OLED board checks pending** |
+| 9: optional OLED | 91e0286 on oled, from e8e710e | Simulation/build passed; **OLED maps and text board-tested by Troy**; other checklist results not individually reported |
 | 10: final notes and measurements | e8e710e | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
 
 The approved ASIC timing configuration is f71810b, between steps 7 and 8.
@@ -2279,11 +2279,12 @@ src/config.json, and original Boolean presets are unchanged.
 
 Worktree: C:\Users\petet\twinmac-oled, branch oled, based on e8e710e.
 Troy approved this implementation for commit on Nov 5, 2026, after
-reporting that the existing board test worked. This commit records the
-OLED implementation on oled only. No branch was pushed. Codex did not
-program a board. The original rtl worktree and plain-demo bitstream remain
-unchanged. OLED-specific hardware observations have not been supplied, so
-the OLED checklist remains pending.
+reporting that the board test worked. He then clarified: "OLED maps and
+text also tested". The OLED maps and text therefore have a successful
+user-reported board result. Other checklist items have not been individually
+reported. Implementation commit 91e0286 is on oled only. No branch was
+pushed. Codex did not program a board. The original rtl worktree and
+plain-demo bitstream remain unchanged.
 
 The new files are fpga/oled_ctrl.sv, fpga/oled_text.sv, fpga/oled_map.sv,
 sim/oled_spi_monitor.sv, and sim/tb_oled_ctrl.sv. This step also changes
@@ -2430,8 +2431,9 @@ during loading/running/sweeping, reset during a sweep, CPU RESET with the
 OLED active, button bounce, shutdown during a frame, safe restart, and
 continued chip/LED operation while the OLED is off. Every sweep run is
 subject to the five-clock pin checks. The integrated run completes 14 maps,
-67795 Boolean results, and 37 requested Boolean cases. No physical display
-orientation or board behavior has been observed.
+67795 Boolean results, and 37 requested Boolean cases. Troy later confirmed
+that the OLED maps and text were also tested on the board. No per-gate
+observations or separate orientation measurement were supplied.
 
 ### Actual xsim regression on the final source
 
@@ -2670,8 +2672,9 @@ image, this image exercises positive 5-bit inputs and the new map presets.
 It still does not exercise negative or full-range signed inputs in hardware.
 The original full-range RTL and extreme gate-level gl_test results remain
 separate evidence; these FPGA results do not establish full 8-bit arithmetic
-at 100 MHz. Troy reports that the existing board test worked. No
-OLED-specific hardware result is claimed without its checklist observations.
+at 100 MHz. Troy reports that the board test worked and confirmed that
+the OLED maps and text were also tested. This user-reported result does
+not extend the input range or remove the recorded packing warnings.
 
 An FPGA-only use_dsp=yes instance attribute requests DSP mapping without
 changing ASIC RTL. Vivado nevertheless reports zero DSP blocks in both
@@ -2740,7 +2743,8 @@ through led[7] and the six OLED pins. No false paths were added. Thus the
 positive setup/hold results establish the constrained internal timing;
 they do not prove an external I/O timing budget, eliminate asynchronous
 metastability, or replace board checks. The synchronizers and SPI/power
-simulation checks address behavior, with physical validation still pending.
+simulation checks address behavior. Troy reports successful OLED map/text
+operation; other physical checklist results have not been individually reported.
 
 ### Build identity and protection of existing work
 
@@ -2793,12 +2797,16 @@ SHA-256: 28671ec5ddfc03038b709f643b2ff6664eec0a6069a8f4544085cc45916d760b
 The original step 8 four-case MAC 1 coverage and +0.606 ns timing result
 describe that earlier plain image. They must not be carried over to this
 new image. This OLED image uses different map weights and a 0..31 sweep.
-Its own board acceptance checklist follows. Every observation is pending.
+Its own board acceptance checklist follows. Troy reports successful OLED
+map/text operation. Individual observation cells remain blank because no
+per-item results were supplied.
 
 ### OLED board acceptance checklist
 
-All results below are predicted. No board has been programmed or observed by Codex.
-Record what you actually see in the blanks. Use this checklist only after reviewing
+The table entries below are predicted values. Troy reports the OLED maps
+and text were tested successfully; individual results were not supplied.
+Codex did not program or observe the board. Record observations in the
+remaining blanks. Use this checklist only after reviewing
 and accepting the OLED build. The original plain-demo bitstream remains separate.
 
 1. With the board off, set JP4 to JTAG.
@@ -2929,10 +2937,11 @@ All six maps and 24 Boolean cases confirmed by: ____________________________
 
 On Nov 5, 2026, Troy wrote: "Board test worked and I'm ready for OLED
 implementation and commit". This authorizes committing the reviewed OLED
-implementation. The board report is recorded as a general pass, without
-inventing individual observations or marking unreported OLED stages as
-complete. The OLED bring-up, map/text, reset, and shutdown/restart checks
-remain pending explicit hardware observations.
+implementation. Troy then clarified: "OLED maps and text also tested".
+The record therefore includes a successful board result for the OLED maps
+and text as reported by Troy. No per-gate readings or exact lit-pixel
+counts were supplied. Bring-up patterns, reset, and shutdown/restart
+checks have not been individually confirmed in this conversation.
 
 The 12 build inputs and both bitstreams were rechecked against the review
 manifest before commit and remain unchanged. All 16 FPGA/test/runner text
