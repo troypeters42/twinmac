@@ -432,7 +432,7 @@ The throwaway test build showed why the last check must be explicit: a test that
 - [ ] Area, power, and maximum frequency come from the final run. Record setup at `ss_100C_1v60`, hold at `ff_n40C_1v95`, and power at `tt_025C_1v80`, and state the power assumptions.
 - [ ] `docs/rtl_notes.md` lets every group member answer the questions below.
 
-Don't change `CLOCK_PERIOD` or the density setting in `src/config.json` to get a pass. Report the failure and ask Troy.
+The approved settings in `src/config.json` are `"PL_RESIZER_SETUP_SLACK_MARGIN": 2` and `"SETUP_VIOLATION_CORNERS": ["*"]`. Changes to `CLOCK_PERIOD` or `PL_TARGET_DENSITY_PCT` still require Troy's approval. Report timing failures and ask before making other configuration changes.
 
 **Questions the notes must answer:**
 

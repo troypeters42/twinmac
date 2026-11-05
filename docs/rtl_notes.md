@@ -1139,3 +1139,120 @@ AGENTS.md requires stopping and asking Troy when LibreLane timing fails.
 Troy approved step 7 on Nov 5 and authorized up to four configuration
 experiments on a separate timing-test branch. The experiments preserve RTL,
 tests, CLOCK_PERIOD, and PL_TARGET_DENSITY_PCT. Step 8 has not started.
+
+## ASIC timing adoption: setup margin and strict corner checks
+
+### Approved configuration and hardware
+
+Troy approved Experiment A on Nov 5. src/config.json now adds these two
+settings above the template's protected section:
+
+```json
+"PL_RESIZER_SETUP_SLACK_MARGIN": 2,
+"SETUP_VIOLATION_CORNERS": ["*"],
+```
+
+RTL, tests, the 20 ns clock period, 60% placement density, and tile size
+are unchanged. These settings change physical optimization and verification,
+not the specified hardware behavior or its registers and combinational
+arithmetic. AGENTS.md records approval for these two configuration lines;
+clock period and density changes still require Troy's approval.
+
+### Baseline versus Experiment A
+
+The original physical build is e3ef3e8, GDS run 41968284611.
+Experiment A is 755cb27, GDS run 41975075383. A passed gds, precheck, and
+gl_test. All nine reported setup and hold slacks were positive.
+
+| Build | RC at ss_100C_1v60 | Setup slack (ns) | Setup WNS (ns) | Setup TNS (ns) |
+| --- | --- | ---: | ---: | ---: |
+| Original | min | -1.123484 | -1.123484 | -1.562258 |
+| Original | nom | -1.387971 | -1.387971 | -2.384322 |
+| Original | max | -1.685580 | -1.685580 | -3.594391 |
+| A | min | 1.334934 | 0.000000 | 0.000000 |
+| A | nom | 1.144626 | 0.000000 | 0.000000 |
+| A | max | 0.932191 | 0.000000 | 0.000000 |
+
+| Build | Worst hold slack (ns) | Cell area (um^2) | Utilization | Max-slew count |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 0.113818 | 20868.8 | 60.9212% | 364 |
+| A | 0.115010 | 20835.0 | 60.8226% | 303 |
+
+Cell area is design__instance__area__stdcell in final/metrics.json.
+The original setup-repair log improved WNS from -1.755 ns to +0.094 ns.
+Hold repair, placement legalization, routing, and extraction followed;
+the final worst slow-corner slack was -1.685580 ns. That is about 1.78 ns
+less than the repair log's final setup value. The 2 ns target leaves
+headroom for these later physical changes. Experiment A's final worst
+setup slack is +0.932191 ns, with worst hold slack +0.115010 ns.
+
+The repair log loaded all nine RC/process corners. The original green
+job gated setup on typical-process corners; it did not establish the
+required slow-corner result.
+
+### Deliberately failing strict-gate test
+
+On timing-test, commit 4d7791d removed the setup-margin override and added
+only SETUP_VIOLATION_CORNERS = ["*"]. GDS run 41977246898 failed in the
+setup checker. Its dependent precheck, gl_test, and viewer jobs were skipped.
+The resolved checker configuration retained TIMING_VIOLATION_CORNERS =
+["*tt*"] while SETUP_VIOLATION_CORNERS was ["*"], proving the explicit
+setup override takes effect.
+
+The actual terminal error names all three failing slow corners:
+
+```text
+Setup violations found in the following
+corners:
+* max_ss_100C_1v60
+* min_ss_100C_1v60
+* nom_ss_100C_1v60
+ERROR LibreLane will now quit.
+Process completed with exit code 1.
+```
+
+This is a deliberate timing-gate failure, not a source or compilation
+failure. The complete timestamped log is retained locally under
+TwinMAC-Adoption-Review/GateProof/gds-job.log in the Windows temp directory.
+The subsequent rtl commit must pass all six GitHub jobs and have no
+negative setup or hold corner; its actual results are supplied with the
+next review packet.
+
+### Open max-slew limitation
+
+Experiment A reports 303 max-slew pin violations. Troy accepted this as
+an open limitation rather than a reason to reject the approved timing
+fix. The table below lists the ten worst distinct nets. Cell pins were
+mapped to nets using the final netlist, then each net's worst transition
+slack was selected across all nine corners. All ten worst cases occur
+at max_ss_100C_1v60; their limit is 0.750000 ns.
+
+| Net | Worst reported pin | Actual slew (ns) | Slew slack (ns) |
+| --- | --- | ---: | ---: |
+| net50 | _1738_/B | 1.198577 | -0.448577 |
+| net55 | _1387_/C1 | 1.182288 | -0.432288 |
+| net62 | _1795_/S | 1.142756 | -0.392756 |
+| net121 | _2448_/RESET_B | 1.032720 | -0.282720 |
+| net53 | _1432_/C1 | 1.008841 | -0.258841 |
+| net98 | _2025_/S | 0.995794 | -0.245794 |
+| net101 | _1274_/S | 0.991278 | -0.241278 |
+| net107 | _2439_/RESET_B | 0.978448 | -0.228448 |
+| net46 | _2032_/B | 0.960684 | -0.210684 |
+| net79 | _2366_/S | 0.935729 | -0.185729 |
+
+These are transition checks, separate from setup/hold WNS. No RTL,
+timing exception, extra pipeline, clock change, or density change was
+introduced to address them.
+
+### DRC scope and status
+
+KLayout DRC remains disabled in the LibreLane build by the template's
+RUN_KLAYOUT_DRC = 0 setting. The build reports zero detailed-route DRC,
+Magic DRC, LVS errors, and antenna-violating nets/pins. Tiny Tapeout
+precheck runs its own Magic DRC and KLayout checks. Experiment A's actual
+precheck log includes Magic DRC plus KLayout FEOL, BEOL, off-grid, pin-label,
+zero-area, and nwell/urpm checks, and ends with Precheck passed.
+
+The next step is the Nexys Video demonstration only after the adopted
+rtl configuration's GitHub jobs and all timing corners pass. Step 9 is
+not authorized. Physical board operation still requires Troy's report.
