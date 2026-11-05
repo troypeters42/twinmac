@@ -17,15 +17,16 @@
 | 5: TwinMAC core | 1f75cbb | Complete; both accumulator-high paths checked |
 | 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
 | 7: required mutations | c105b87 | Complete; every required mutation was caught |
-| 8: Nexys Video demo | 93ed933 | Troy reports board test passed; detailed observations not supplied |
-| 9: optional OLED | 91e0286 on oled, from e8e710e | Simulation/build passed; **OLED maps and text board-tested by Troy**; other checklist results not individually reported |
+| 8: Nexys Video demo | 93ed933 | **Board checklist passed Nov 5, 2026; observer: Troy** |
+| 9: optional OLED | 91e0286; this board-result commit on oled | **Board checklist passed Nov 5, 2026; observer: Troy** |
 | 10: final notes and measurements | e8e710e | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
 
 The approved ASIC timing configuration is f71810b, between steps 7 and 8.
 It adds the 2 ns setup-repair margin and all-corner setup gate. The clock
 period remains 20 ns and placement density remains 60%. The remaining
 open items are 303 max-slew checks, one max-fanout check, the two FPGA
-LUT-packing warnings, and Troy's physical board observations.
+unexplained LUT-packing warnings. Troy completed both board checklists
+on Nov 5, 2026; the results apply to the exact bitstreams recorded below.
 
 ## Confirmed working decisions
 
@@ -1789,8 +1790,8 @@ The AND row, with LD1 through LD6 off, is therefore the direct board
 check of the MAC 1 / clamp1 / h2 logic associated with PDRC-144 and
 PDRC-146. For inputs (0,0), (0,1), (1,0), and (1,1), the complete
 seven-bit result must be 0, 0, 0, and 1; checking only LD0 would miss
-unexpected upper result bits. Troy later reported that the board test
-worked, without supplying observations for individual checks. These four
+unexpected upper result bits. Troy confirmed all 24 Boolean cells on Nov 5, 2026, including this AND
+row with LD1-LD6 off. These four
 cases are the only MAC 1 computations this bitstream can perform,
 because its presets and Boolean inputs are fixed. A pass therefore covers MAC 1
 for this bitstream. It does not explain the warnings or carry over to a rebuild.
@@ -1839,11 +1840,11 @@ Inputs are written as (x1, x2), meaning (SW0, SW1). Each cell is expected LD0 / 
 
 Board observations and programming have not been performed by Codex.
 
-Step 8 was committed with its board test pending. On Nov 5, 2026, Troy
-reported that the board test worked and approved the OLED implementation
-for commit. Individual switch/LED observations were not supplied, so the
-checklist cells remain blank. OLED-specific checks are recorded separately
-in step 9. Step 10 records the existing ASIC run.
+Step 8 was committed with its board test pending. Troy completed the
+plain-bitstream checklist on Nov 5, 2026: all 24 truth-table cells matched,
+including the AND row with LD1-LD6 off. Startup, CPU RESET, and BTNC
+checks matched. Observer: Troy. The exact bitstream hash is recorded
+below with the completed OLED checklist. Step 10 records the ASIC run.
 
 ## Step 10: Final ASIC area, power, and maximum frequency
 
@@ -2953,3 +2954,37 @@ The approved files are committed on oled only. rtl and main remain at
 e8e710e and 162764d, respectively; no push or merge is included. No Icarus,
 Yosys, new ASIC build, or new gate-level run is claimed for this FPGA-only
 addition. The original ASIC signoff limitations remain unchanged.
+
+### Completed board checklists: Nov 5, 2026
+
+Observer: Troy. These are Troy's reported hardware observations; Codex did
+not operate or observe the physical board.
+
+| Tested image | Exact SHA-256 | Observed result |
+| --- | --- | --- |
+| Plain Nexys Video demo | 28671ec5ddfc03038b709f643b2ff6664eec0a6069a8f4544085cc45916d760b | All 24 cells matched, including the AND row with LD1-LD6 off. Startup, CPU RESET, and BTNC checks matched. |
+| OLED decision-map demo | 92bc134db12484854d3db658e53356d00f36530afd86b7d552c42ca0aaae3c35 | All three bring-up stages, all six maps with correct orientation, all 24 Boolean cases, CPU RESET, and BTNC shutdown/restart matched. |
+
+Both step 8 and step 9 board checklists are passed for these exact images.
+The PDRC warnings did not stop either tested bitstream from working on the
+board. They remain unexplained. These observations apply only to these
+bitstreams and do not remove the warnings or establish a result for a
+future rebuild.
+
+The tested OLED bitstream was copied before any rebuild to:
+
+    C:\Users\petet\twinmac-oled-tested\nexys_top.bit
+
+The copy was verified against the full OLED SHA-256 above, not merely
+its 92bc134d prefix. The plain image remains at its original path:
+
+    C:\Users\petet\twinmac\fpga\build\nexys_top.bit
+
+Earlier pending statuses and blank prediction tables above describe the
+review checkpoints before Troy's complete report; this dated observation
+record supersedes them. No exact measured pixel count, timing measurement,
+or explanation of the packing warnings is inferred from the visual tests.
+
+This board-tested revision is committed and pushed on oled only. rtl and
+main remain unchanged. Subsequent reset-domain/test changes will remain
+separate, uncommitted, and require a new build and hardware retest.
