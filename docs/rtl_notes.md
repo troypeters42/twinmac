@@ -728,3 +728,120 @@ The step 5 changes are src/twinmac_core.sv, sim/tb_twinmac_core.sv, and
 docs/rtl_notes.md. There are no open questions. Troy authorized commit and
 push after the added MAC 1 corner passed with the exact requested totals.
 Step 6 has not started.
+
+## Step 6: Tiny Tapeout chip wrapper
+
+### What hardware this describes
+
+src/tt_um_troypeters42_twinmac.sv connects the verified core to the Tiny
+Tapeout pins. The core still has two MACs, two clamps, and one clock.
+sck is an input strobe, never a clock inside the design.
+
+Two reset flip-flops assert asynchronously when rst_n goes low and release
+the internal reset after two rising clock edges. All other resettable
+registers use that internal reset. Reset clears the input registers, core
+state, result, and done flag. The 72-bit weight register retains its value;
+all weights must be loaded before the first computation.
+
+Each of sck, start, lat_x1, and lat_x2 passes through two synchronizing
+flip-flops. A third register remembers the previous synchronized value;
+the combinational expression current AND NOT previous makes a one-cycle
+rising-edge pulse. Serial data sdi has its own two synchronizing registers.
+ASYNC_REG attributes identify the synchronizer stages for implementation
+tools; simulation does not model analog metastability.
+
+Two signed 8-bit input registers capture ui_in on the corresponding latch
+pulse. The core receives those stored bytes, not the live data bus.
+The sticky done register clears on reset and every synchronized start
+pulse, including starts the busy core ignores. A start has priority over
+setting the flag. Otherwise the core's completion pulse sets it.
+
+Nonblocking assignments make the flag see the preceding core_done value:
+y becomes valid on core edge E6 and the flag sets on E7. The result is
+already valid when the flag rises. That flag stays high until another
+start or reset. The core's E0 through E7 schedule is unchanged.
+
+The edge detectors and output wiring are combinational. The reset stages,
+synchronizers, previous-control values, latched input bytes, and done flag
+are registers. uo_out is the flag followed by the seven-bit result.
+uio_out and uio_oe are always zero. ena and uio_in[7:5] are unused.
+
+### Pin timing and verification
+
+Both testbenches operate only through chip pins. They keep sdi and ui_in
+stable for at least five clock cycles before and after their related
+control rising edge. Every control high and low lasts at least five cycles.
+They never shift weights or latch new inputs during a computation.
+
+sim/tb_twinmac.sv uses a 20 ns clock. test/test.py uses the same protocol
+with a slow 1000 ns functional clock so UNIT_DELAY gate models can settle.
+That gate-level test is a functional check, not a 50 MHz timing measurement;
+the physical flow must establish timing separately.
+
+Both tests use the 24 literal golden truth-table outputs, eight directed
+corners, and two computations after reset: 34 completed results in total.
+The corners include both +32895 accumulators, the negative accumulator
+corner, second-pass saturation, both hidden values at 64, unequal input
+weights, and signed inputs.
+
+Checks explicitly require the old done flag to clear before completion,
+the new flag to remain set, and both UIO output buses to stay zero. Changing
+ui_in after latching proves that the input registers hold their bytes.
+ena alternates without affecting the result. Reset is checked between
+clock edges, with retained weights and cleared input bytes. An in-flight
+reset must cancel the run without producing a stale completion flag.
+Unknown output bits fail comparisons or integer conversion.
+
+### Actual local verification
+
+Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','sim\tb_twinmac.sv')
+```
+
+The runner exited with code 0. There were 34 completed chip-pin results,
+17982 checks, and zero failures. The last 10 command-output lines were:
+
+```text
+Eight directed chip-pin corners completed.
+Reset, retained weights, zeroed inputs, and aborted run checked.
+Completed chip-pin results: 34.
+Chip-pin checks completed: 17982; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 336011 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac.sv" Line 201
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 23:20:01 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_twinmac.run.log
+ALL TESTS PASSED
+```
+
+The complete vendor and combined logs remain local, ignored generated files:
+
+- sim/logs/tb_twinmac.run.log
+- sim/logs/tb_twinmac.xvlog.log
+- sim/logs/tb_twinmac.xelab.log
+- sim/logs/tb_twinmac.xsim.log
+- sim/logs/tb_twinmac.console.log
+
+Python AST parsing also accepted test/test.py. The GitHub test and gl_test
+jobs run that same cocotb test against RTL and the generated gate netlist.
+Actual GitHub job results and run links are supplied in the review packet
+for this commit; local xsim alone does not establish their success.
+
+### Integration files and review status
+
+info.yaml keeps the original title, author, and description. It selects
+SystemVerilog, the frozen six-source top, a 1x2 tile, and 50 MHz. Pin names
+describe the implemented interface. test/Makefile lists those six sources,
+test/tb.v instantiates the real top with optional gate-level power pins,
+and test/test.py replaces the template adder test. docs/info.md explains
+the hardware, pins, and host procedure. src/project.v is deleted.
+
+The earlier design modules, sim/run_xsim.ps1, .github/workflows/, and
+src/config.json are unchanged. No FPGA or physical board result is claimed.
+
+Troy explicitly authorized committing and pushing step 6 to rtl after
+chip-pin xsim passes, so the required GitHub jobs can run before review.
+This is the step 6 exception to the usual pre-commit review checkpoint.
+Step 7 has not started. No merge or push to main is authorized.
