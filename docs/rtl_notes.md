@@ -9,7 +9,8 @@
 - Step 1 is committed and pushed on rtl.
 - Step 2 is committed as fec9360 and pushed on rtl.
 - Step 3 is committed as 4489ce1 and pushed on rtl.
-- Step 4 passed xsim and was approved by Troy on Nov 4, 2026.
+- Step 4 is committed as 6027a6d and pushed on rtl.
+- Step 5 passed the requested MAC 1 corner rerun and was approved for commit and push.
 
 ## Confirmed working decisions
 
@@ -556,3 +557,174 @@ remained at 162764db71c8e561e3e8b9399a30a42f3c584fcd.
 The three step 4 changes are src/control_fsm.sv, sim/tb_control_fsm.sv, and
 docs/rtl_notes.md. There are no open questions. Troy approved step 4 on
 Nov 4, 2026, and authorized its commit and push on rtl. Step 5 has not started.
+
+## Step 5: TwinMAC core
+
+### What hardware this describes
+
+src/twinmac_core.sv connects the four previously verified module types:
+one weight_sr, one control_fsm, two mac_unit instances, and two clamps.
+It adds the hidden registers h1 and h2 and the output register y.
+All instances use the same rising-edge clk.
+
+The nine weight bytes are continuously decoded as signed 8-bit values.
+These assignments are wires, not additional registers. A combinational
+four-way operand selector routes x1, x2, h1, or h2 to MAC 0 and chooses
+the corresponding weight and bias. MAC 1 computes only the hidden-neuron
+pass. Its enable stays low during the output-neuron pass, so acc1 holds.
+
+| operand_sel | MAC 0 operands | MAC 0 bias | MAC 1 operands | MAC 1 bias |
+| --- | --- | --- | --- | --- |
+| 0 | x1, w11 | b1 | x1, w21 | b2 |
+| 1 | x2, w12 | b1 | x2, w22 | b2 |
+| 2 | zero-extended h1, a | b | unused, driven zero | b2 |
+| 3 | zero-extended h2, c | b | unused, driven zero | b2 |
+
+h1 and h2 are unsigned seven-bit values. Adding a leading zero creates
+an eight-bit signed multiplier operand in the range 0 through 127.
+Sign-extending a value such as 64 would instead produce -64, which is wrong.
+
+acc0 always feeds clamp0, and acc1 always feeds clamp1. At hidden_en,
+the two clamped values load h1 and h2. At output_en, clamp0 loads y.
+This reuses MAC 0 and its clamp for the output neuron and uses exactly
+two multipliers and two clamp instances. There is no added pipeline.
+
+The core's new registers are h1, h2, and y. The instantiated modules own
+the accumulator, FSM, done, and weight registers. rst_n asynchronously
+clears both accumulators, h1, h2, y, FSM state, and done. The weight shift
+register deliberately has no reset, so reset preserves loaded weights.
+
+x1 and x2 are not latched by this core: the caller holds them stable for
+the run. The caller also loads all 72 weight bits before starting and
+does not shift weights during computation. Input latches and external-pin
+synchronizers belong to the chip wrapper in step 6.
+
+### What happens on the six compute edges
+
+E0 accepts start and prepares STEP1 controls. Existing y holds until E6.
+
+| Edge | Registers updated | Integer operation |
+| --- | --- | --- |
+| E1 | acc0, acc1 | b1 + x1*w11; b2 + x1*w21 |
+| E2 | acc0, acc1 | add x2*w12; add x2*w22 |
+| E3 | h1, h2 | clamp the complete hidden sums to 0 through 127 |
+| E4 | acc0 | b + h1*a |
+| E5 | acc0 | add h2*c; acc1 continues holding |
+| E6 | y, done | clamp acc0 into y; done rises and FSM becomes idle |
+
+done clears on the next rising edge. A start at E7 begins the next run.
+Nonblocking assignments let the output register and done flag update
+together on E6 using the controls and sums established before that edge.
+
+### How the test works
+
+sim/tb_twinmac_core.sv uses independent 32-bit integer arithmetic for the
+three-neuron formula. Raw weight bytes become signed integers by subtracting
+256 when their unsigned value is at least 128. Each full sum is limited
+to 0 through 127, with no rounding.
+
+The testbench retains expected accumulators, hidden values, y, and done.
+It updates those references according to the specification's edge table.
+At each check it compares a 56-bit vector containing both 17-bit accumulators,
+both seven-bit hidden registers, seven-bit y, and done. Case inequality
+detects unknown bits. Hierarchical reads of dut.acc0, dut.acc1, dut.h1,
+and dut.h2 observe actual values only; no expected value comes from the DUT.
+These hierarchical references are confined to the testbench.
+
+Every run checks the old vector before E0, the held values after E0,
+and the pre-edge and post-edge vectors for E1 through E6. This verifies
+intermediate arithmetic, register holding, exact done timing, and y holding
+until completion. Weight loading also checks that arithmetic registers hold.
+
+The six frozen gate presets are each loaded once and run on all four
+binary input pairs. Their expected outputs are literal truth-table bits.
+Consecutive cases reuse weights and accept the next start at E7.
+
+Eight directed corners follow:
+
+| Case | x1 | x2 | Expected y |
+| --- | --- | --- | --- |
+| Required accumulator high | -128 | -128 | 127 |
+| MAC 1 accumulator high | -128 | -128 | 127 |
+| Required accumulator low | -128 | -128 | 5 |
+| Required second-pass saturation | 127 | 127 | 127 |
+| Hidden h1=64 passed with weight 1 | 0 | 0 | 64 |
+| Hidden h2=64 passed with weight 1 | 0 | 0 | 64 |
+| Distinct w11=2 and w12=3 | 5 | 7 | 31 |
+| Negative input and negative weight | -4 | 2 | 24 |
+
+The high-corner vectors check acc0=32895 and acc1=32895 at E2 before clamping.
+The two hidden-value vectors explicitly expose incorrect sign extension.
+The asymmetric hidden weights expose swapping w11 and w12.
+
+The seed is 0x54574D35. All 10000 random cases use nine random weight bytes
+and two random signed input bytes. Their expected y comes from integer math.
+Busy-start masks cycle through all 64 patterns; busy starts must not change
+the six-step schedule or its intermediate results.
+
+Reset tests interrupt runs after E0 through E5, covering every compute state.
+A completed XNOR result of 1 is seeded before each interruption. Reset must
+clear every observed register before the next rising edge. start stays high
+through reset release, which must not update data registers by itself.
+The next rising edge accepts start, then a full six-edge run completes.
+Reset is also asserted with done high, followed by another computation
+without reloading weights. Three idle cycles check result holding and done
+clearing without a new start.
+
+The 10045 completed results comprise 24 gate cases, eight corners, 10000
+random cases, six reset-test seed runs, six runs restarted after reset,
+and one final computation using weights retained across reset.
+There are eight reset sequences including initial reset. The simulation
+watchdog is 10000000 ns; the successful run finished at 7914296 ns.
+
+### Actual verification
+
+Tool: Vivado Simulator 2024.2. Run from C:\Users\petet\twinmac:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_twinmac_core -Sources @('src\clamp.sv', 'src\mac_unit.sv', 'src\weight_sr.sv', 'src\control_fsm.sv', 'src\twinmac_core.sv', 'sim\tb_twinmac_core.sv')
+```
+
+The rerun after adding the MAC 1 high corner exited with code 0. All 1582858
+core-state checks passed with zero failures. The last 10 console lines were:
+
+```text
+Random cases completed: 10000; all 64 busy-start masks exercised.
+Reset aborts: six phases; all registers cleared; weights retained.
+Completed results: 10045; reset sequences: 8.
+Core-state checks completed: 1582858; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 7914296 ns : File "C:/Users/petet/TwinMac/sim/tb_twinmac_core.sv" Line 312
+exit
+INFO: [Common 17-206] Exiting xsim at Wed Nov  4 23:06:26 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_twinmac_core.run.log
+ALL TESTS PASSED
+```
+
+The actual raw and combined logs are retained locally as ignored files:
+
+- sim/logs/tb_twinmac_core.run.log
+- sim/logs/tb_twinmac_core.xvlog.log
+- sim/logs/tb_twinmac_core.xelab.log
+- sim/logs/tb_twinmac_core.xsim.log
+- sim/logs/tb_twinmac_core.console.log
+
+### Decisions and review status
+
+The testbench was written before the RTL. Review added a mirrored MAC 1
+high-accumulator case; all existing expected values and checks are unchanged.
+The four earlier module files, core RTL, and runner are
+unchanged. Operand selection is combinational; h1, h2, and y are the only
+new core registers. The weights remain unreset, with no loading guard.
+
+Only xsim was run locally for step 5. No synthesis, timing, Icarus, Yosys,
+mutation, gate-level, chip-pin, or physical board result is claimed.
+The reviewer's earlier throwaway integration is separate from this core.
+
+Step 4 was committed and pushed as 6027a6d. Local and remote main remained
+at 162764db71c8e561e3e8b9399a30a42f3c584fcd.
+
+The step 5 changes are src/twinmac_core.sv, sim/tb_twinmac_core.sv, and
+docs/rtl_notes.md. There are no open questions. Troy authorized commit and
+push after the added MAC 1 corner passed with the exact requested totals.
+Step 6 has not started.
