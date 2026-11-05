@@ -1256,3 +1256,413 @@ zero-area, and nwell/urpm checks, and ends with Precheck passed.
 The next step is the Nexys Video demonstration only after the adopted
 rtl configuration's GitHub jobs and all timing corners pass. Step 9 is
 not authorized. Physical board operation still requires Troy's report.
+
+## Step 8: Nexys Video demonstration
+
+### ASIC prerequisite and scope
+
+The adopted rtl commit is f71810b. Its test, docs, gds, precheck, gl_test,
+and viewer jobs all passed. All nine ASIC setup WNS and hold WNS values
+are zero; actual worst slacks are positive. The all-corner setup gate was
+proved by the deliberately failing timing-test commit 4d7791d before adoption.
+The ASIC max-slew count remains 303, recorded as an open limitation above.
+
+The new files are fpga/nexys_top.sv, fpga/twinmac.xdc, fpga/build.tcl,
+and sim/tb_nexys_top.sv. Existing ASIC RTL, tests, and configuration are
+unchanged by this step. The FPGA uses the same chip wrapper as the ASIC.
+Status: **board test pending**. Troy approved the design and supplement.
+This step records the local simulation/implementation result and the
+approved review changes; physical board observations are still required.
+Steps 9 and 10 have not started.
+
+### Hardware and clock-edge behavior
+
+nexys_top adds a host controller around the real chip pin interface.
+clk is the only clock. sck is a strobe made from state decoding; it does
+not clock any register. The board's CPU RESET connects directly to the
+chip's active-low reset. The host has its own two-register asynchronous
+assert/synchronized release circuit. Five switch inputs each have two
+synchronizing registers.
+
+The host state register, phase counter, selected gate, valid flag, serial
+bit index, preset word, and input data byte store state. The next-state
+logic, preset selection function, pin decoding, and LED wiring are
+combinational. Synthesis can trim constant bits or recode the FSM.
+
+The typed FSM waits after reset, then compares synchronized SW[4:2]
+against the gate whose weights are loaded. It captures one complete
+72-bit preset and sends bits 71 down to 0. LOAD_SETUP, LOAD_HIGH, and
+LOAD_LOW each last five clock cycles. At 100 MHz, that is 50 ns per
+phase and 150 ns per bit. All 72 bits are sent before a computation starts.
+
+A gate change during loading finishes the current complete word, then
+reloads the latest selection before starting. A gate change during a run
+waits for completion before any loading. Thus weights never shift during
+a run. At each idle boundary, a different synchronized select code triggers
+a full reload. This includes transitions between 110 and 111, whose
+presets both implement AND.
+
+For each computation, the host captures SW0 as the integer byte x1,
+waits five cycles, pulses lat_x1 high and low for five cycles each, then
+does the same for SW1/x2. It pulses start high and low for five cycles
+each and waits for the sticky done flag before repeating. The data byte
+is registered, so changing the switches cannot break the pin setup/hold
+rule or change the chip's latched inputs during a run.
+
+led[6:0] is wired to y and led[7] to the done flag. OLED VDD/VBAT controls
+stay high; OLED reset, DC, clock, and data stay low. BTNC is unused until
+the optional OLED step. No older OLED source is included.
+
+### Test independence and coverage
+
+The testbench was written before the new RTL. It uses literal frozen
+weight presets and truth tables, not values read from the design.
+It reconstructs serial words and input bytes from the generated chip pins,
+checks every completed computation, and separately checks that the desired
+switch settings eventually produce a new matching computation.
+
+All 32 combinations of eight select codes and four input pairs pass.
+Input-byte matching also catches a swapped SW0/SW1 mapping, even though
+the six Boolean gates are commutative. Each select-code change must load
+a new complete preset, including the two AND aliases.
+
+The monitor checks five-cycle data setup/hold and control high/low widths,
+complete MSB-first presets, no shifting or input latching during a run,
+explicit done-flag clearing, zero UIO drivers, known outputs, and OLED-off
+levels. Direct stage reads check the host's two-edge reset release and
+two-stage switch synchronization. Directed cases cover a gate change
+during loading, a gate change during a run, and asynchronous reset after
+the core has begun computing with a stored result of 1. The reset case
+retains the AND select code and explicitly requires a new full weight
+load, so a gate-change reload cannot hide a missing reset reload.
+
+### Actual simulation
+
+Tool: Vivado xsim 2024.2. Command from the repository root:
+
+```powershell
+& .\sim\run_xsim.ps1 -Testbench tb_nexys_top -Sources @('src\clamp.sv','src\mac_unit.sv','src\weight_sr.sv','src\control_fsm.sv','src\twinmac_core.sv','src\tt_um_troypeters42_twinmac.sv','fpga\nexys_top.sv','sim\tb_nexys_top.sv')
+```
+
+After the approved review change, the unknown-pin check uses reduction
+XOR and case inequality instead of $isunknown, with no expected values or
+check counts changed. The runner exited 0. It verified 35 requested cases, 12 complete weight
+words, and 53 completed computations from 54 starts. One live run was
+deliberately aborted by reset. All 50440 checks passed. The simulation
+finished at 152560 ns. The last 10 command-output lines were:
+
+```text
+Board reset during a run and complete preset reload checked.
+Requested cases verified: 35; complete weight words: 12.
+Observed computations: 53; starts: 54.
+FPGA pin/protocol checks: 50440; failures: 0.
+ALL TESTS PASSED
+$finish called at time : 152560 ns : File "C:/Users/petet/TwinMac/sim/tb_nexys_top.sv" Line 303
+exit
+INFO: [Common 17-206] Exiting xsim at Thu Nov  5 02:28:54 2026...
+Verification log: C:\Users\petet\twinmac\sim\logs\tb_nexys_top.run.log
+ALL TESTS PASSED
+```
+
+The raw vendor logs and combined run log remain under sim/logs with
+the tb_nexys_top prefix. The runner was not modified.
+
+### Actual FPGA implementation
+
+Tool: Vivado 2024.2. The build targets xc7a200tsbg484-1 and the frozen
+Nexys Video pin map. The XDC defines one 10 ns clock, all used package
+pins and I/O standards, CONFIG_VOLTAGE=3.3, and CFGBVS=VCCO.
+
+Command from the repository root, after creating fpga/build:
+
+```powershell
+& 'C:\Xilinx\Vivado\2024.2\bin\vivado.bat' -mode batch -source fpga/build.tcl -log fpga/build/vivado.log -journal fpga/build/vivado.jou
+```
+
+The build exited 0 and printed BUILD PASSED after synthesis, optimization,
+placement, routing, timing reports, DRC, checkpoint writing, and bitstream
+generation. Both worst timing paths were nonnegative:
+
+| Routed result | Actual value |
+| --- | ---: |
+| Clock period | 10.000 ns (100 MHz) |
+| Worst setup slack | +0.606 ns |
+| Worst hold slack | +0.122 ns |
+| Setup TNS / failing endpoints | 0.000 ns / 0 |
+| Hold THS / failing endpoints | 0.000 ns / 0 |
+| Slice LUTs | 230 (0.17%) |
+| Slice registers | 202 (0.08%) |
+| Slices | 82 (0.25%) |
+| Block RAM tiles | 0 |
+| DSP blocks | 0 |
+| Bonded IOBs | 21 (7.37%) |
+| BUFGCTRL | 1 |
+
+This Boolean-input bitstream uses LUT/CARRY arithmetic, zero DSP blocks,
+and zero RAM. It does not contain two unrestricted signed-eight-bit
+multipliers. These are FPGA resources, separate from ASIC area.
+
+The bitstream is fpga/build/nexys_top.bit, 9730758 bytes.
+Its SHA-256 is:
+
+```text
+28671ec5ddfc03038b709f643b2ff6664eec0a6069a8f4544085cc45916d760b
+```
+
+The complete build log is fpga/build/vivado.log. Routed reports are
+timing_summary.rpt, setup_paths.rpt, hold_paths.rpt, utilization.rpt,
+drc.rpt, and results.txt in fpga/build. The routed checkpoint is
+nexys_top_routed.dcp. Vivado's auxiliary clockInfo.txt was retained there
+after the run. All generated build files are already ignored by Git.
+
+### Board arithmetic scope and build-input identity
+
+The board host loads x1 and x2 only as the integer 0 or 1. The existing
+routed checkpoint retains only x1_reg_reg[0] and x2_reg_reg[0]; bits [7:1]
+of both chip input registers are removed. MAC 1 only multiplies a Boolean
+input (or zero) by a weight, so it needs no general multiplier in this
+bitstream. MAC 0 sees only nonnegative seven-bit operands: Boolean inputs
+in the first pass and zero-extended h1/h2 in the second pass, multiplied
+by signed eight-bit weights. Its declared product's redundant sign bit
+can be trimmed. This arithmetic specialization follows from the source
+and the constant input bits; module LUT counts alone do not prove it.
+
+Negative and large x values are not exercised on hardware. The +0.606 ns
+setup result and zero DSP count apply only to this Boolean demo bitstream;
+they do not show that two full signed-eight-bit multipliers run at 100 MHz.
+The general multipliers and full signed input range are verified in RTL
+simulation only. The unchanged ASIC sources retain both full multipliers.
+Vivado's logs do not state why it selected LUT logic rather than DSPs, so
+its specific mapping heuristic remains unproven.
+
+All eight build-input hashes below match the preserved post-build manifest.
+Their modification times predate the original bitstream and they remain
+unchanged after the build, including this review update. These are the
+actual source and XDC inputs used by the preserved bitstream, not hashes
+of an altered or rebuilt design. The one-line simulation-only testbench
+change does not require a new bitstream. The build script, checkpoint,
+and bitstream also remain unchanged.
+
+| Build input | SHA-256 |
+| --- | --- |
+| fpga/nexys_top.sv | 4c586275e364c259f05a80e0ec98d3038af1b9ab8043598794caf50026283cc7 |
+| fpga/twinmac.xdc | d0fbe121a3c67ff2094f83ce630440b0c6997baca5beda4298cc044c74336a23 |
+| src/clamp.sv | 4b8fefb98bfa90016f9003cb531b4f10f340cde75ad6d77b32f5595241b11c97 |
+| src/control_fsm.sv | 78a8f89a31f85df969678f2b6779e528ba900ffeded71e1df1457eb3575871c1 |
+| src/mac_unit.sv | fbad2c0bbecaa0499cab8da6cc047f117febebbc83365ad06f9a2703d79ce42d |
+| src/tt_um_troypeters42_twinmac.sv | 71b148a3d625c0b733c4d11070a11091e3cce31bf0d37df3d53ae1a48b703a41 |
+| src/twinmac_core.sv | a5b6699983c84d12169c518d78b3de7199d35bd789c2887a31c6e8754554711f |
+| src/weight_sr.sv | 49f144cece83d5c23167cd0346d26cade918d0f9e58da72c0d2093cadf1b0a37 |
+
+### Routed utilization by hierarchy
+
+This table was extracted from the existing routed checkpoint. Rows marked
+"including children" include descendant cells; rows marked "own" exclude
+them. There are 48 host flip-flops and 154 chip flip-flops, 202 in total.
+All rows use zero DSP, RAMB36, and RAMB18 blocks.
+
+| Instance | Module / ownership | LUTs | Flip-flops |
+| --- | --- | ---: | ---: |
+| nexys_top | including children | 230 | 202 |
+| nexys_top | own host logic | 25 | 48 |
+| chip | tt_um_troypeters42_twinmac, including children | 207 | 154 |
+| chip | own wrapper logic | 16 | 19 |
+| chip/core | twinmac_core, including children | 191 | 135 |
+| chip/core | own core logic | 0 | 21 |
+| chip/core/clamp0 | clamp | 0 | 0 |
+| chip/core/clamp1 | clamp | 0 | 0 |
+| chip/core/controller | control_fsm | 104 | 8 |
+| chip/core/mac0 | mac_unit | 35 | 17 |
+| chip/core/mac1 | mac_unit | 10 | 17 |
+| chip/core/weight_store | weight_sr | 46 | 72 |
+
+LUT counts by module are not functional sizes. Vivado moved logic across
+module boundaries and combined LUTs across hierarchy. Child LUT counts
+are therefore not necessarily additive, and a zero-LUT clamp row does
+not mean clamping was removed. In particular, the controller's 104 LUTs
+and MAC 1's 10 LUTs describe optimized ownership, not isolated source costs.
+
+### Implementation limits and warnings
+
+The timing report has zero unconstrained internal endpoints, zero
+combinational loops, and no multiple-clock register pins. Six asynchronous
+board inputs (CPU reset and switches) have no input-delay constraints,
+and eight LED outputs have no output-delay constraints. These external
+I/O paths are not covered by a synchronous board-interface timing
+contract. The 100 MHz result applies to the clocked internal paths.
+No timing exceptions were added.
+
+Vivado reported zero errors and zero critical warnings. Its DRC report
+contains two warnings, PDRC-144 and PDRC-146: LUT C6/C5 and D6/D5 pairs at
+SLICE_X2Y69 have different equations without A6 connected to Global Logic
+High. They are retained for review; no claim of a warning-free DRC run
+is made. Other build warnings include the deliberately constant OLED
+outputs and unused controls. The bitstream precondition DRC completed
+with zero errors.
+
+Only RTL simulation and FPGA synthesis/implementation were run for this
+step. Post-route functional simulation and physical board operation are
+unverified. The FPGA result does not establish ASIC timing.
+
+### LUT-packing warnings: existing checkpoint evidence
+
+The checkpoint has no named logical LUT cells in C6LUT, C5LUT, D6LUT,
+or D5LUT at SLICE_X2Y69. The site instead has physical constant/route-through
+LUT configurations. A control query of the occupied B6LUT correctly returns
+chip/core/controller/next_acc1_carry_i_2, so the four empty cell queries
+are not substituted with guessed source-cell names.
+
+The physical BEL properties expose CONFIG.EQN, not a logical cell INIT
+property, for these four positions. The following INIT equivalents are
+calculated from each separate reported equation (A1 is the least significant
+truth-table address bit). They are not a decoded shared LUT SRAM word from
+the bitstream, and no nonexistent logical-cell INIT property is claimed.
+
+| Physical BEL at SLICE_X2Y69 | Named logical LUT cell | Reported CONFIG.EQN | Function-equivalent INIT (derived) |
+| --- | --- | --- | --- |
+| C6LUT | none | O6=(A6+~A6)*(1) | 64'hFFFFFFFFFFFFFFFF |
+| C5LUT | none; data route for weights_reg[30]/D | O5=(A1) | 32'hAAAAAAAA |
+| D6LUT | none | O6=(A6+~A6)*(0) | 64'h0000000000000000 |
+| D5LUT | none; data route for weights_reg[31]/D | O5=(A2) | 32'hCCCCCCCC |
+
+What drives A6: the C6LUT/A6 and D6LUT/A6 BEL pins have no attached logical
+pin or net. The SLICE_X2Y69/C6 and /D6 site inputs also have no net. Thus
+no A6 signal driver or explicit global-high tie is recorded in this
+checkpoint. This observation does not establish a physical default level.
+
+The associated named cells are chip/core/mac1/next_acc1_carry (CARRY4),
+chip/core/weight_store/weights_reg[30] (FDRE at CFF), and
+chip/core/weight_store/weights_reg[31] (FDRE at DFF). The carry's S[2] and
+S[3] pins use <const1> and <const0>, respectively. The register D pins map
+through C5LUT/A1 and D5LUT/A2. These associations describe observed pins
+and equations; they do not by themselves prove the packing warnings safe.
+
+For completeness, the actual named logic LUTs elsewhere in this same site
+are next_acc1_carry_i_2 at B6LUT with INIT=64'hF5FFF3F3F5FFFFFF, and
+next_acc1_carry_i_3 at A6LUT with INIT=64'h0A000C0C0A000000, both under
+chip/core/controller. Those are not the four positions named by the warnings.
+
+The inspection only opened the existing routed checkpoint. It did not
+synthesize, place, route, change constraints, or generate a bitstream.
+The focused checkpoint output follows (trailing whitespace omitted):
+
+```text
+Read-only inspection of existing routed checkpoint nexys_top_routed.dcp
+Named logical cells at SLICE_X2Y69:
+  chip/core/controller/next_acc1_carry_i_2; REF_NAME=LUT6; BEL=SLICEM.B6LUT
+  chip/core/controller/next_acc1_carry_i_3; REF_NAME=LUT6; BEL=SLICEM.A6LUT
+  chip/core/mac1/next_acc1_carry; REF_NAME=CARRY4; BEL=SLICEM.CARRY4
+  chip/core/weight_store/weights_reg[30]; REF_NAME=FDRE; BEL=SLICEM.CFF
+  chip/core/weight_store/weights_reg[31]; REF_NAME=FDRE; BEL=SLICEM.DFF
+
+BEL: SLICE_X2Y69/B6LUT
+Named logical cell: chip/core/controller/next_acc1_carry_i_2
+CONFIG.EQN: O6=(A5*A4*A1)+(A5*A4*(~A1)*A3*(~A6)*(~A2))+(A5*A4*(~A1)*(~A3)*A6)+(A5*A4*(~A1)*(~A3)*(~A6)*(~A2))+(A5*(~A4)*A1)+(A5*(~A4)*(~A1)*A3*(~A6))+(A5*(~A4)*(~A1)*(~A3))+((~A5)*A4*A1)+((~A5)*A4*(~A1)*A6)+((~A5)*A4*(~A1)*(~A6)*(~A2))+((~A5)*(~A4))
+
+BEL: SLICE_X2Y69/C6LUT
+Named logical cell:
+CONFIG.EQN: O6=(A6+~A6)*(1)
+A6 logical pins:
+A6 logical nets:
+
+BEL: SLICE_X2Y69/C5LUT
+Named logical cell:
+CONFIG.EQN: O5=(A1)
+
+BEL: SLICE_X2Y69/D6LUT
+Named logical cell:
+CONFIG.EQN: O6=(A6+~A6)*(0)
+A6 logical pins:
+A6 logical nets:
+
+BEL: SLICE_X2Y69/D5LUT
+Named logical cell:
+CONFIG.EQN: O5=(A2)
+Site input SLICE_X2Y69/C6 net:
+Site input SLICE_X2Y69/D6 net:
+
+Carry pin: chip/core/mac1/next_acc1_carry/S[2]; net: chip/core/mac1/<const1>
+Local physical BEL pin: SLICE_X2Y69/CARRY4/S2
+
+Carry pin: chip/core/mac1/next_acc1_carry/S[3]; net: chip/core/mac1/<const0>
+Local physical BEL pin: SLICE_X2Y69/CARRY4/CYINIT
+Local physical BEL pin: SLICE_X2Y69/CARRY4/DI0
+Local physical BEL pin: SLICE_X2Y69/CARRY4/DI2
+Local physical BEL pin: SLICE_X2Y69/CARRY4/DI3
+Local physical BEL pin: SLICE_X2Y69/CARRY4/S3
+
+Register data pin: chip/core/weight_store/weights_reg[30]/D
+Net: chip/core/weight_store/Q[17]
+Physical BEL pins: SLICE_X2Y69/C5LUT/A1 SLICE_X2Y69/CFF/D
+
+Register data pin: chip/core/weight_store/weights_reg[31]/D
+Net: chip/core/weight_store/Q[18]
+Physical BEL pins: SLICE_X2Y69/D5LUT/A2 SLICE_X2Y69/DFF/D
+```
+
+The full original warning text follows (trailing whitespace omitted):
+
+```text
+PDRC-144#1 Warning
+SLICE_PairEqSame_C6C5_WARN
+Luts C6LUT and C5LUT in use in site SLICE_X2Y69 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-146#1 Warning
+SLICE_PairEqSame_D6D5_WARN
+Luts D6LUT and D5LUT in use in site SLICE_X2Y69 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+
+```
+
+These warnings remain an implementation limitation. Bitstream generation
+passed, but no claim that the warnings are harmless is made. Post-route
+functional simulation and board observations have not been performed.
+
+### Board verification and review checkpoint
+
+## Nexys Video board-test checklist
+
+1. With the board off, set JP4 to JTAG.
+2. Connect 12 V power to J21 and micro-USB from PROG (J12) to the computer.
+3. Power on with SW8 and confirm the OLED stays dark. If it lights up, stop. Don't reprogram it or power it off until we've identified its shutdown step.
+
+Only after the OLED-dark check passes:
+
+- [ ] Program fpga/build/nexys_top.bit onto the Nexys Video.
+- [ ] Before pressing anything, confirm LD7 looks lit and LD0 matches the switches.
+  No reset press should be needed after programming.
+
+Predicted steady-state behavior, not a board measurement: LD7 is on about 83%
+of the time at about 2.4 MHz (35 of 42 cycles at 100 MHz). It should look steady
+and may be slightly dimmer than LD0 when LD0 is on.
+
+- [ ] Confirm the OLED stays dark throughout these checks.
+- [ ] Hold CPU RESET: LD0 through LD7 should clear. Release it to load the selected preset.
+- [ ] Use SW[4:2] for the gate, SW0 for x1, and SW1 for x2.
+- [ ] For every table cell below, set the two switches, let the output settle, and record LD0.
+- [ ] Confirm LD1 through LD6 stay off for these Boolean results.
+- [ ] Confirm LD7 illuminates after settling. Repeated runs are fast, so it may look steady.
+
+Inputs are written as (x1, x2), meaning (SW0, SW1). Each cell is expected LD0 / observed LD0.
+
+| SW[4:2] | Gate | (0,0) | (0,1) | (1,0) | (1,1) |
+| --- | --- | --- | --- | --- | --- |
+| 000 | AND | 0 / ___ | 0 / ___ | 0 / ___ | 1 / ___ |
+| 001 | OR | 0 / ___ | 1 / ___ | 1 / ___ | 1 / ___ |
+| 010 | XOR | 0 / ___ | 1 / ___ | 1 / ___ | 0 / ___ |
+| 011 | NAND | 1 / ___ | 1 / ___ | 1 / ___ | 0 / ___ |
+| 100 | NOR | 1 / ___ | 0 / ___ | 0 / ___ | 0 / ___ |
+| 101 | XNOR | 1 / ___ | 0 / ___ | 0 / ___ | 1 / ___ |
+
+- [ ] Check selects 110 and 111 repeat AND, including a 1 at input (1,1).
+- [ ] Change gates without resetting; confirm the output settles to the new gate's truth table.
+- [ ] Select NAND with (0,0), confirm LD0=1, hold CPU RESET to clear it, then release and confirm 1 returns.
+- [ ] Press/release BTNC: OLED remains dark and computation continues. OLED control is not implemented yet.
+- [ ] Report all 24 observed values and any mismatch, including gate select, inputs, LD0, and LD7.
+
+Board observations and programming have not been performed by Codex.
+
+Step 8 is committed with **board test pending**. Troy must report all board
+observations before hardware acceptance. Steps 9 and 10 have not started.
