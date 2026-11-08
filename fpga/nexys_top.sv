@@ -69,9 +69,10 @@ module nexys_top #(
     endcase
   endfunction
 
-  always_ff @(posedge clk or negedge cpu_resetn) begin
-    if (!cpu_resetn) reset_pipe <= 2'b00;
-    else reset_pipe <= {reset_pipe[0], 1'b1};
+  // Align both CPU reset assertion and release to clk before either domain
+  // observes its effects. FPGA configuration initializes the two stages low.
+  always_ff @(posedge clk) begin
+    reset_pipe <= {reset_pipe[0], cpu_resetn};
   end
   assign host_rst_n = reset_pipe[1];
   always_ff @(posedge clk) oled_reset_pipe <= {oled_reset_pipe[0], 1'b1};
@@ -218,11 +219,10 @@ module nexys_top #(
     endcase
   end
 
-  // FPGA mapping preference only: no ASIC source or pipeline is changed.
-  (* use_dsp = "yes" *) tt_um_troypeters42_twinmac chip (
+  tt_um_troypeters42_twinmac chip (
     .ui_in(chip_ui), .uo_out(chip_uo), .uio_in(chip_uio),
     .uio_out(chip_uio_out), .uio_oe(chip_uio_oe),
-    .ena(1'b1), .clk(clk), .rst_n(cpu_resetn)
+    .ena(1'b1), .clk(clk), .rst_n(host_rst_n)
   );
   assign led = chip_uo;
   oled_map bitmap (

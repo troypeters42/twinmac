@@ -22,6 +22,22 @@ module tb_nexys_top;
   integer unsigned frame_index, pixel_index, before_maps, before_shutdowns;
   logic [7:0] expected_byte;
   logic saved_vdd, saved_vbat;
+  logic [1:0] reference_reset_pipe = 2'b00;
+  logic [6:0] reference_sw_meta, reference_sw_sync;
+  logic reference_image_valid = 1'b0, reference_publish_pending = 1'b0;
+  logic [2:0] reference_gate = 3'd0, publication_gate;
+  logic reference_p = 1'b0, reference_q = 1'b0, publication_p, publication_q;
+  integer unsigned publication_cycle;
+  logic frame_snapshot_pending = 1'b0;
+  logic [1:0] snapshot_mode;
+  logic [2:0] snapshot_gate;
+  logic snapshot_p, snapshot_q;
+  integer unsigned continuous_frames_checked = 32'd0;
+  integer unsigned continuous_address;
+  logic [7:0] continuous_wanted;
+  logic reset_alignment_active = 1'b0;
+  logic reset_guard_vdd, reset_guard_vbat;
+  integer unsigned aligned_resets_checked = 32'd0;
   nexys_top #(.OLED_MS_CYCLES(32'd40), .OLED_VBAT_WAIT_CYCLES(32'd80),
               .OLED_DISPLAY_WAIT_CYCLES(32'd60), .OLED_SHUTDOWN_CYCLES(32'd100),
               .BUTTON_DEBOUNCE_CYCLES(32'd5)) dut (
@@ -103,13 +119,91 @@ module tb_nexys_top;
     end
   endtask
 
+  // Independent switch synchronizers model what the renderer samples at a
+  // frame boundary. No renderer metadata or DUT state is used as expected data.
+  always @(posedge clk) begin
+    reference_reset_pipe <= {reference_reset_pipe[0], cpu_resetn};
+  end
+  always @(posedge clk or negedge reference_reset_pipe[1]) begin
+    if (!reference_reset_pipe[1]) begin
+      reference_sw_meta <= 7'd0;
+      reference_sw_sync <= 7'd0;
+    end else begin
+      reference_sw_meta <= sw;
+      reference_sw_sync <= reference_sw_meta;
+    end
+  end
+
+  // The strobe supplies only the frame boundary. All expected payload fields
+  // come from the independent switch model and completed Boolean pin traffic.
+  always @(posedge clk) begin
+    if (dut.display_start === 1'b1) begin
+      check(reference_image_valid, "user frame waits for completed Boolean publication");
+      check(!frame_snapshot_pending, "one snapshot for each complete user frame");
+      snapshot_mode = reference_sw_sync[6:5];
+      snapshot_gate = reference_gate;
+      snapshot_p = reference_p;
+      snapshot_q = reference_q;
+      frame_snapshot_pending = 1'b1;
+    end
+    if (reset_alignment_active) begin
+      check(oled_vdd === reset_guard_vdd && oled_vbat === reset_guard_vbat,
+            "CPU reset never changes OLED power during alignment test");
+    end
+  end
+
+  // Check every completed user frame, including old snapshots in flight during
+  // switch/gate changes and CPU reset. No two-frame grace period is used here.
+  always @(negedge clk) begin
+    if (monitor.user_frames != continuous_frames_checked) begin
+      check(monitor.user_frames == continuous_frames_checked + 32'd1 &&
+            frame_snapshot_pending, "every SPI user frame has exactly one snapshot");
+      for (continuous_address = 32'd0; continuous_address < 32'd512;
+           continuous_address = continuous_address + 32'd1) begin
+        continuous_wanted = frame_reference(continuous_address, snapshot_mode,
+                                            snapshot_gate, snapshot_p, snapshot_q);
+        check(monitor.frame_bytes[continuous_address] === continuous_wanted,
+              $sformatf("every user frame %0d byte=%0d expected=%02h got=%02h",
+                        monitor.user_frames, continuous_address, continuous_wanted,
+                        monitor.frame_bytes[continuous_address]));
+      end
+      continuous_frames_checked = monitor.user_frames;
+      frame_snapshot_pending = 1'b0;
+    end
+  end
+
+  function automatic logic [2:0] gate_from_boolean_word(input logic [71:0] word);
+    case (word)
+      72'h00_FF_01_FF_01_01_00_01_01: gate_from_boolean_word = 3'd1;
+      72'h00_FE_01_FF_01_01_00_01_01: gate_from_boolean_word = 3'd2;
+      72'h01_FF_00_FF_01_01_00_01_01: gate_from_boolean_word = 3'd3;
+      72'h01_01_FF_FF_01_01_00_01_01: gate_from_boolean_word = 3'd4;
+      72'h01_02_FF_FF_01_01_00_01_01: gate_from_boolean_word = 3'd5;
+      default: gate_from_boolean_word = 3'd0;
+    endcase
+  endfunction
+
   // Observe the generated chip pins, never use DUT state as expected data.
   always @(posedge clk) begin
     #(32'd1);
     cycle_number = cycle_number + 32'sd1;
+    // The host publishes two clocks after the sticky done flag rises. Updating
+    // after the edge preserves the old value for a simultaneous frame snapshot.
+    if (reference_publish_pending && cycle_number == publication_cycle) begin
+      reference_gate = publication_gate;
+      reference_p = publication_p;
+      reference_q = publication_q;
+      reference_image_valid = 1'b1;
+      reference_publish_pending = 1'b0;
+    end
     check((dut.chip_uio_out === 8'd0) && (dut.chip_uio_oe === 8'd0),
           "chip UIO drivers remain zero");
-    if (!cpu_resetn) begin
+    if (!reference_reset_pipe[1]) begin
+      reference_image_valid = 1'b0;
+      reference_publish_pending = 1'b0;
+      reference_gate = 3'd0;
+      reference_p = 1'b0;
+      reference_q = 1'b0;
       check(led === 8'd0, "reset clears LEDs and done");
       previous_pins = 8'd0;
       previous_data = 8'd0;
@@ -149,6 +243,7 @@ module tb_nexys_top;
               check(cycle_number - last_sdi_change >= 32'sd5, "sdi setup before sck");
               check(!(loaded_word[47:40] == 8'hE1 && map_index > 32'd0 &&
                       map_index < 32'd1024), "finish a sweep before shifting new weights");
+              if (bit_count == 32'd0) reference_image_valid = 1'b0;
               shifted_word = {shifted_word[70:0], dut.chip_uio[0]};
               if (bit_count == 32'd71) begin
                 loaded_word = shifted_word;
@@ -212,6 +307,11 @@ module tb_nexys_top;
           check(led === {1'b1, 6'd0, truth_value(run_word, run_p, run_q)},
                 "Boolean result matches independent literal truth table");
           boolean_results = boolean_results + 32'd1;
+          publication_gate = gate_from_boolean_word(run_word);
+          publication_p = run_p[0];
+          publication_q = run_q[0];
+          publication_cycle = cycle_number + 32'd2;
+          reference_publish_pending = 1'b1;
         end
         completed_word = run_word;
         completed_p = run_p;
@@ -391,6 +491,101 @@ module tb_nexys_top;
                gate_select, mode, lit_pixels);
     end
   endtask
+  // Observe storage, excluding unreset weight/map memories and the two reset
+  // synchronizer stages themselves. No RTL signal supplies expected arithmetic.
+  function automatic logic [255:0] host_registers();
+    host_registers = {dut.sw_meta, dut.sw_sync, dut.state, dut.phase_count,
+                      dut.loaded_gate, dut.boolean_gate, dut.map_mode, dut.map_valid,
+                      dut.map_x, dut.map_y, dut.bit_index, dut.weight_word,
+                      dut.data_byte, dut.run_x1, dut.run_x2,
+                      dut.boolean_x1, dut.boolean_x2, dut.boolean_y};
+  endfunction
+  function automatic logic [255:0] host_reset_values();
+    host_reset_values = {7'd0, 7'd0, 5'd0, 3'd0, 3'd0, 3'd0, 1'b1, 1'b0,
+                         5'd0, 5'd0, 7'd71, 72'd0, 8'd0, 8'd0, 8'd0,
+                         1'b0, 1'b0, 7'd0};
+  endfunction
+  function automatic logic [255:0] chip_registers();
+    chip_registers = {dut.chip.reset_pipe, dut.chip.control_meta, dut.chip.control_sync,
+                      dut.chip.control_previous, dut.chip.sdi_meta, dut.chip.sdi_sync,
+                      dut.chip.x1_reg, dut.chip.x2_reg, dut.chip.done_flag,
+                      dut.chip.core.controller.state, dut.chip.core.done,
+                      dut.chip.core.acc0, dut.chip.core.acc1,
+                      dut.chip.core.h1, dut.chip.core.h2, dut.chip.core.y};
+  endfunction
+
+  task automatic aligned_cpu_reset(input string context_name,
+                                    input logic finish_current_frame);
+    logic [255:0] before_host, before_chip;
+    logic [255:0] first_edge_host, first_edge_chip;
+    integer unsigned frame_before;
+    begin
+      @(posedge clk);
+      #(3.3);
+      check(dut.host_rst_n && dut.chip.rst_n && dut.chip.core_rst_n,
+            "reset alignment starts from running host and chip");
+      before_host = host_registers();
+      before_chip = chip_registers();
+      reset_guard_vdd = oled_vdd;
+      reset_guard_vbat = oled_vbat;
+      reset_alignment_active = 1'b1;
+      frame_before = monitor.user_frames;
+      if (finish_current_frame)
+        check(frame_snapshot_pending && monitor.frame_active,
+              "reset alignment exercises a user frame already in flight");
+      cpu_resetn = 1'b0;
+      #(0.1);
+      check(dut.host_rst_n === 1'b1 && dut.chip.rst_n === 1'b1 &&
+            host_registers() === before_host && chip_registers() === before_chip,
+            "off-edge CPU RESET leaves host and chip storage unchanged");
+      #(6.5);
+      check(host_registers() === before_host && chip_registers() === before_chip,
+            "no host or chip storage changes before the first sampling edge");
+      @(posedge clk);
+      #(0.2);
+      check(dut.reset_pipe === 2'b10 && dut.host_rst_n === 1'b1 &&
+            dut.chip.rst_n === 1'b1 && dut.chip.core_rst_n === 1'b1,
+            "CPU RESET does not assert after only one sampling edge");
+      // Normal clocked work may continue at edge one. Its resulting storage
+      // must then remain unchanged until the second edge asserts reset.
+      first_edge_host = host_registers();
+      first_edge_chip = chip_registers();
+      #(9.7);
+      check(dut.host_rst_n === 1'b1 && host_registers() === first_edge_host &&
+            chip_registers() === first_edge_chip,
+            "no off-edge host or chip change before second reset edge");
+      @(posedge clk);
+      #(0.2);
+      check(dut.reset_pipe === 2'b00 && dut.host_rst_n === 1'b0 &&
+            dut.chip.rst_n === 1'b0 && dut.chip.core_rst_n === 1'b0,
+            "CPU RESET asserts host and chip on second sampling edge");
+      check(host_registers() === host_reset_values(),
+            "all CPU-reset host registers reach specified reset values");
+      check(chip_registers() === 256'd0 && led === 8'd0,
+            "all resettable chip registers and LEDs clear on second reset edge");
+      if (finish_current_frame) begin
+        wait (monitor.user_frames == frame_before + 32'd1);
+        @(negedge clk);
+        #(32'd1);
+        check(continuous_frames_checked == monitor.user_frames,
+              "reset frame completed byte for byte using its old snapshot");
+        repeat (32'd20) @(negedge clk);
+        check(monitor.user_frames == frame_before + 32'd1 && !dut.display_start,
+              "no new user frame while CPU RESET is held");
+      end else repeat (32'd5) @(negedge clk);
+      check(oled_vdd === reset_guard_vdd && oled_vbat === reset_guard_vbat,
+            "OLED power remains unchanged throughout CPU RESET");
+      @(negedge clk); cpu_resetn = 1'b1;
+      @(posedge clk); #(0.2);
+      check(dut.host_rst_n === 1'b0, "aligned reset release waits through edge one");
+      @(posedge clk); #(0.2);
+      check(dut.host_rst_n === 1'b1, "aligned reset releases at edge two");
+      reset_alignment_active = 1'b0;
+      aligned_resets_checked = aligned_resets_checked + 32'd1;
+      $display("Aligned CPU reset checked: %s (fall 3.3 ns after clk).", context_name);
+    end
+  endtask
+
   task automatic press_button;
     begin
       @(negedge clk); btnc = 1'b1;
@@ -449,6 +644,30 @@ module tb_nexys_top;
     check_frame(2'd3, 3'd7, 1'b1, 1'b1);
     @(negedge clk); sw[6:5] = 2'd0;
 
+    // Change display mode while data bytes are on the wire. The whole current
+    // frame must keep its original snapshot in both directions.
+    wait (monitor.phase == 32'd21 && monitor.data_index == 32'd50);
+    @(negedge clk); sw[6:5] = 2'd1;
+    check_frame(2'd1, 3'd7, 1'b1, 1'b1);
+    wait (monitor.phase == 32'd21 && monitor.data_index == 32'd50);
+    @(negedge clk); sw[6:5] = 2'd0;
+    check_frame(2'd0, 3'd7, 1'b1, 1'b1);
+
+    // Change Y before its text bytes are transmitted. An unsnapshotted Y would
+    // now disagree with the X1/X2 values captured for this user frame.
+    wait (monitor.phase == 32'd21 && monitor.data_index == 32'd50);
+    @(negedge clk); sw[0] = 1'b0;
+    wait_case(3'd7, 1'b0, 1'b1);
+    check_frame(2'd0, 3'd7, 1'b0, 1'b1);
+
+    // A gate switch during a frame must finish the old map/text together, then
+    // publish the new map only after its first completed Boolean result.
+    wait (monitor.phase == 32'd21 && monitor.data_index == 32'd50);
+    @(negedge clk); sw[4:0] = 5'b01011;
+    wait_case(3'd2, 1'b1, 1'b1);
+    check_frame(2'd0, 3'd2, 1'b1, 1'b1);
+    $display("Mode, Y, and gate changed during user frames; every frame checked.");
+
     // Preserve the earlier load-change and busy-start pin checks.
     @(negedge clk); sw[4:0] = 5'b00100;
     wait (bit_count == 32'd10);
@@ -475,25 +694,24 @@ module tb_nexys_top;
     @(negedge clk); sw[4:0] = 5'b01100;
     wait (loaded_word === map_preset(3'd3) && map_index == 32'd80 && run_pending);
     saved_words = words_loaded;
-    #(32'd2); cpu_resetn = 1'b0;
-    #(32'd1); check(led === 8'd0, "asynchronous reset aborts map run");
-    repeat (32'd5) @(negedge clk);
-    cpu_resetn = 1'b1;
+    aligned_cpu_reset("during map sweep", 1'b0);
     wait_case(3'd3, 1'b0, 1'b0);
     check(words_loaded >= saved_words + 32'd2, "reset restarts full map then Boolean load");
     check_frame(2'd0, 3'd3, 1'b0, 1'b0);
 
     wait (monitor.phase == 32'd21 && monitor.data_index == 32'd100);
-    saved_vdd = oled_vdd; saved_vbat = oled_vbat;
-    #(32'd2); cpu_resetn = 1'b0;
-    #(32'd1);
-    check(oled_vdd === saved_vdd && oled_vbat === saved_vbat,
-          "CPU reset never changes OLED power");
-    check(led === 8'd0, "CPU reset still clears chip LEDs");
-    repeat (32'd5) @(negedge clk);
-    cpu_resetn = 1'b1;
+    aligned_cpu_reset("during SPI user frame", 1'b1);
     wait_case(3'd3, 1'b0, 1'b0);
     check_frame(2'd0, 3'd3, 1'b0, 1'b0);
+
+    // Separate reset with known nonzero Boolean storage proves that early
+    // chip reset cannot be hidden by outputs that were already zero.
+    wait (dut.boolean_y == 7'd1 && dut.chip.core.y == 7'd1);
+    check(dut.boolean_y == 7'd1, "nonzero Boolean value before aligned CPU RESET");
+    aligned_cpu_reset("nonzero Boolean result", 1'b0);
+    wait_case(3'd3, 1'b0, 1'b0);
+    check_frame(2'd0, 3'd3, 1'b0, 1'b0);
+    check(aligned_resets_checked == 32'd3, "all three reset-alignment scenarios exercised");
 
     before_shutdowns = monitor.shutdowns;
     repeat (32'd3) begin
@@ -505,8 +723,19 @@ module tb_nexys_top;
     check(monitor.shutdowns == before_shutdowns && !oled_vdd && !oled_vbat,
           "button bounce does not toggle OLED");
     wait (monitor.phase == 32'd21 && monitor.data_index == 32'd120);
-    press_button();
-    wait (monitor.shutdowns == before_shutdowns + 32'd1);
+    @(negedge clk); btnc = 1'b1;
+    for (wait_index = 32'd0;
+         wait_index < 32'd100000 && monitor.shutdowns == before_shutdowns;
+         wait_index = wait_index + 32'd1) @(negedge clk);
+    check(btnc && monitor.shutdowns == before_shutdowns + 32'd1,
+          "BTNC press triggers shutdown before release");
+    repeat (32'd30) @(negedge clk);
+    check(oled_vdd && oled_vbat && monitor.powerups == 32'd1,
+          "held BTNC does not restart OLED");
+    btnc = 1'b0;
+    repeat (32'd30) @(negedge clk);
+    check(oled_vdd && oled_vbat && monitor.shutdowns == before_shutdowns + 32'd1,
+          "BTNC release does not toggle OLED");
     saved_words = boolean_results;
     repeat (32'd200) @(negedge clk);
     check(boolean_results > saved_words, "Boolean computation continues while OLED is off");
@@ -514,6 +743,11 @@ module tb_nexys_top;
     wait (monitor.powerups == 32'd2);
     check_frame(2'd0, 3'd3, 1'b0, 1'b0);
     $display("Gate-change, reset-during-sweep, CPU-reset power, debounce, and BTNC tests passed.");
+    // Let the falling-edge frame checker finish before comparing its count.
+    #(32'd1);
+    check(continuous_frames_checked == monitor.user_frames &&
+          continuous_frames_checked > 32'd0, "all completed user frames verified");
+    $display("Self-consistent user frames checked: %0d.", continuous_frames_checked);
     $display("Completed maps: %0d; Boolean results: %0d; requested cases: %0d.",
              completed_maps, boolean_results, cases_verified);
     $display("FPGA pin/protocol checks: %0d; SPI/power checks: %0d; failures: %0d.",
