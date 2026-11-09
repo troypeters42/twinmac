@@ -7,7 +7,7 @@
 - main remains at 162764d. Prior implementation commits below are on rtl; OLED commit 91e0286 is on oled.
 - The final ASIC measurements come from 93ed933, GDS run 41988729116.
   Its six GitHub jobs passed. The FPGA-only OLED work preserves that ASIC design.
-- OLED Part 2 board checklist passed for b73e56ff...; observer: Troy. Date and notes were not supplied. This commit records the board-tested Part 2 version on oled.
+- OLED Part 2 board checklist passed for b73e56ff...; observer: Troy. Date: Nov __, 2026 (day not supplied); no additional notes. This commit records the board-tested Part 2 version on oled.
 
 | Step | Commit | Current result |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 | 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
 | 7: required mutations | c105b87 | Complete; every required mutation was caught |
 | 8: Nexys Video demo | 93ed933 | **Board checklist passed Nov 5, 2026; observer: Troy** |
-| 9: optional OLED | 91e0286; 054202b; this Part 2 commit on oled | **Board checklists passed for 92bc134d... and Part 2 b73e56ff...; observer: Troy. Part 2 date and notes not supplied.** |
+| 9: optional OLED | 91e0286; 054202b; this Part 2 commit on oled | **Board checklists passed for 92bc134d... and Part 2 b73e56ff...; observer: Troy. Part 2: Nov __, 2026 (day not supplied); no additional notes.** |
 | 10: final notes and measurements | e8e710e | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
 
 The approved ASIC timing configuration is f71810b, between steps 7 and 8.
@@ -2082,8 +2082,8 @@ open limitation. The ten worst distinct nets are retained in the earlier
 "Open max-slew limitation" table. No timing exception or hardware change
 was made to remove or hide the violations.
 
-The final metric design__max_fanout_violation__count = 1 is also an
-**open item**, separate from the max-slew count above.
+The final metric design__max_fanout_violation__count = 1 is the documented
+CTS-root waiver; see the slew and fanout investigation section below.
 
 Step 8's two FPGA LUT-packing warnings remain recorded. Troy's later general
 board-test pass report does not supply individual AND-row observations.
@@ -2269,6 +2269,123 @@ At the e8e710e step 10 review, step 8 remained board test pending and
 optional step 9 was skipped. That documentation-only commit changed no
 source, test, configuration, or FPGA implementation. The later authorized
 OLED work is recorded below; ASIC slew/fanout items remain open.
+
+## Slew and fanout investigation (Nov 8, 2026)
+
+The accepted layout remains commit 93ed933, GDS run 41988729116. The
+ASIC inputs on rtl/e8e710e and oled/68f0e0b are byte-identical to that
+run. No slew experiment was adopted, no CTS setting was changed, and
+the 20 ns period and 60% placement density are unchanged.
+
+### Cause and library context
+
+At max_ss_100C_1v60, 303 violating pin entries correspond to 31 distinct
+nets. The dominant drivers were inserted before CTS by
+OpenROAD.RepairDesignPostGPL, not by PostCTS hold repair. That placement
+step inserted 95 clkdlybuf4s25_1 cells: 14 input buffers from buffer_ports
+and 81 repair_design fanout buffers. None was an existing cell resized
+into that type. The final violating nets include 26 driven by that cell,
+accounting for 265 of the 303 pin violations. The remaining five nets
+use two dlymetal6s2s_1 drivers and a22oi_2, a31oi_2 and o22ai_2 drivers.
+
+The placement fanout split creates groups of up to ten loads using a
+default weak _1 buffer-type cell. _1 is the drive-strength suffix;
+clkdlybuf4s25 is a delay-buffer family name, not a 4x drive indication.
+The weak fanout/input drivers plus their routed load explain the main
+slew problem. Larger buffers inserted for direct slew/cap repair in B
+cleared their violations, while fourteen clkdlybuf4s25_1 to buf_1 swaps
+did not solve the general problem. Neither post-placement nor post-GRT
+repair changes clock nets under the tested settings.
+
+Worst baseline transition is 1.198577 ns (1.199 ns rounded), on net50,
+against the flow's 0.75 ns maximum-transition constraint. The pinned
+slow-corner sky130_fd_sc_hd library declares time_unit=1ns and
+default_max_transition=1.5 ns; the worst transition is below that library
+default. Here 1.5 ns describes the default transition limit, not the last
+characterization-table index. Static timing includes the reported slow
+edges. The flow still reports 303 max-slew violations; this investigation
+does not turn those counts into zeros or claim a slew repair succeeded.
+
+### Configuration-only experiments
+
+Each committed experiment changed only src/config.json on slew-fix.
+All six GitHub jobs passed for both A and B, but neither met the data-net
+slew acceptance rule. C was not run. The table uses max_ss setup and
+min_ff hold, rounded from the recorded artifacts:
+
+| Run | Commit / GDS run | Max_ss slew pins / nets | Max_ss setup ns | Min_ff hold ns | Cell area um^2 | Result |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Baseline | 93ed933 / [run 41988729116](https://github.com/troypeters42/twinmac/actions/runs/41988729116) | 303 / 31 | +0.932191 | +0.115010 | 20835.0 | Design of record; limitations retained |
+| A | de2e9bb / [run 42495274082](https://github.com/troypeters42/twinmac/actions/runs/42495274082) | 212 / 20 | +0.651770 | +0.111614 | 21058.9 | Rejected: data slew remains |
+| B | f9f5add / [run 42496380190](https://github.com/troypeters42/twinmac/actions/runs/42496380190) | 259 / 27 | +0.905574 | +0.111295 | 20781.2 | Rejected: data slew remains |
+
+- A set DESIGN_REPAIR_MAX_SLEW_PCT=40 and DESIGN_REPAIR_MAX_CAP_PCT=40.
+  It reduced max_ss pins from 303 to 212, but cost 0.280421 ns of setup
+  margin and did not clear the violations. Its hold slack stayed positive.
+- B removed A's settings and enabled RUN_POST_GRT_DESIGN_REPAIR. It left
+  259 max_ss pins on 27 nets, with worst transition 1.379108 ns. Typical
+  corner counts worsened: nom_tt 0 to 22, min_tt 0 to 11, max_tt 11 to 44.
+  The GRT step substituted fifteen cells (fourteen clkdlybuf4s25_1 and one
+  dlymetal6s2s_1 became buf_1) and inserted five buf_4/clkbuf_4 cells.
+  Hold remained positive at every corner; no post-GRT hold repair was enabled.
+- D excluded seven specified weak buffer cells while keeping dlygate4sd*
+  available for hold repair. Its local-only run stopped at
+  RepairDesignPostGPL: all fourteen input and eighty-one fanout buffers
+  became dlygate4sd3_1, still _1 cells. The 95-cell safeguard failed, so D
+  was not committed or pushed and no D GDS run exists. Its synthesized
+  1390 cells, instance types and connections matched the baseline. The
+  uncommitted D config was discarded, leaving slew-fix at f9f5add.
+
+Baseline, A and B have zero max-capacitance violations and zero unwaived
+data-net fanout violations at every corner. Detailed-route DRC, Magic DRC,
+LVS and antenna counts remain zero in these three artifacts. The positive
+setup/hold values did not override the separate data-net slew acceptance rule.
+
+The A and B commits are retained on slew-fix; they are not merged into rtl,
+oled or this release. D's failed local preflight and all raw evidence are
+retained in the review packets outside the repository:
+
+- TwinMAC-Slew-Review.md (baseline, A, B and D)
+- TwinMAC-Slew-D-Review.md and TwinMAC-Slew-Evidence.zip
+
+Those packets are not tracked in the repository. This section copies the
+relevant findings and numbers; it does not claim another implementation run.
+
+### Clock-root fanout waiver
+
+The single fanout violation is clknet_0_clk, driven by clkbuf_0_clk/X,
+cell sky130_fd_sc_hd__clkbuf_16: fanout 16 against the flow limit of 10.
+This is the CTS root net; the tested data-repair steps do not repair it.
+Troy waived this clock-root fanout count only. Data-net fanout remains
+subject to zero violations. The clock transition limit remains 0.75 ns.
+
+Read-only queries of the archived final netlist/SPEF/SDC checked all
+seventeen pins on this net in separate single-corner STA contexts. Worst
+transition across all nine corners is 0.218327 ns (0.218 ns rounded), well
+below 0.75 ns. The table preserves the recorded clock skew values:
+
+| Corner | Worst root-net transition ns | Network skew ns | Setup skew ns | Hold skew ns |
+| --- | ---: | ---: | ---: | ---: |
+| nom_tt_025C_1v80 | 0.135992 | 0.095038 | +0.311359 | -0.381014 |
+| nom_ss_100C_1v60 | 0.207724 | 0.156102 | +0.349603 | -0.475984 |
+| nom_ff_n40C_1v95 | 0.107097 | 0.069947 | +0.296096 | -0.343235 |
+| min_tt_025C_1v80 | 0.130987 | 0.088629 | +0.306328 | -0.377117 |
+| min_ss_100C_1v60 | 0.199746 | 0.149770 | +0.343737 | -0.469575 |
+| min_ff_n40C_1v95 | 0.102743 | 0.064097 | +0.291301 | -0.338034 |
+| max_tt_025C_1v80 | 0.145798 | 0.106497 | +0.321741 | -0.390739 |
+| max_ss_100C_1v60 | 0.218327 | 0.168303 | +0.359661 | -0.483705 |
+| max_ff_n40C_1v95 | 0.115011 | 0.081136 | +0.306625 | -0.355137 |
+
+Network skew is the worst rise/fall leaf-clock latency spread. Setup/hold
+skew columns are the archived path-skew reports and include their uncertainty
+and clock-reconvergence treatment; they are not interchangeable with the
+network spread. Negative hold skew is not a negative hold slack. The root's
+max_ss network skew is 0.168303 ns; setup/hold skew is +0.359661/-0.483705 ns.
+All nine setup and hold slacks remain positive in the accepted layout.
+
+Decision: keep the 93ed933 / 41988729116 layout as the design of record.
+The 303 data-net slew warnings and the single documented CTS-root fanout
+waiver remain recorded. No experiment is adopted by this release work.
 
 ## Step 9: Optional OLED decision-map demo
 
@@ -2810,8 +2927,8 @@ Troy passed the plain checklist on Nov 5, 2026 using bitstream 28671ec5...
 The complete plain and earlier OLED results are recorded in rtl_notes.md.
 
 Board result: PASSED, as reported by Troy for this exact OLED Part 2 image.
-Observer: Troy. Board-test date: not supplied. Notes: not supplied.
-The date and notes were left blank in Troy's approval; they are not inferred
+Observer: Troy. Board-test date: Nov __, 2026 (day not supplied). Notes: no additional notes.
+Troy supplied November 2026 but left the day blank. The missing day is not inferred
 from the commit date. Individual readings were not supplied. Expected values
 and blank fields below remain as a reusable checklist, not pending acceptance.
 
@@ -2970,7 +3087,7 @@ All six maps and 24 Boolean cases confirmed by: ____________________________
 #### Short retest for the Part 2 rebuild
 
 Troy reported this checklist passed for the exact Part 2 hash above.
-Date and notes were not supplied. The form remains available for future retests;
+Date: Nov __, 2026 (day not supplied); no additional notes. The form remains available for future retests;
 the Nov 5 results for the older images remain separate historical records.
 
 - [ ] After the plain prerequisite passes, run the three bring-up modes,
@@ -3048,7 +3165,7 @@ from Part 1; the Part 2 section below records its later hardware acceptance.
 
 OLED Part 2 was prepared as a separate change from 054202b on Nov 8,
 2026. Troy subsequently reported its board checklist passed and approved
-this commit and push on oled only. The board-test date was not supplied.
+this commit and push on oled only. The board-test date is Nov __, 2026 (day not supplied); Troy reports no additional notes.
 The older Step 8 and Step 9 implementation descriptions and board
 results above apply to their original tested images. The new wrapper reset
 behavior described here supersedes the older OLED wrapper behavior only
@@ -3502,11 +3619,11 @@ no source, test, build script or XDC changed after verification or testing.
 | --- | --- |
 | Result | OLED Part 2 board checklist passed, as reported by Troy |
 | Observer | Troy |
-| Board-test date | Not supplied; left blank in Troy's approval |
-| Notes | Not supplied; left blank in Troy's approval |
+| Board-test date | Nov __, 2026 (day not supplied) |
+| Notes | No additional notes |
 | Tested SHA-256 | b73e56ff6bc0b685c04e21fca6818a0c2c9b9cb86fba790bb95aea43a65a7148 |
 
-The missing date is not replaced with the commit date. No individual
+The missing day is not replaced with the commit date. No individual
 measurements or additional observations are inferred from the overall pass.
 
 The tested image was copied to:

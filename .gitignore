@@ -20,3 +20,9 @@ xsim.dir/
 *.pb
 *.wdb
 fpga/build/
+
+# Standalone Vivado artifacts outside fpga/build/
+*.bit
+*.dcp
+*.str
+/clockInfo.txt
