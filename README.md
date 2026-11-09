@@ -58,7 +58,7 @@ workload or board-power measurement.
 
 All eight xsim testbenches passed for OLED Part 2, and all fourteen OLED
 mutations were detected. The plain and OLED board checklists passed on Nov 5, 2026, and the
-OLED Part 2 checklist passed on Nov __, 2026 (observer: Troy). Its 23 methodology warnings
+OLED Part 2 checklist passed on Nov 8, 2026 (observer: Troy). Its 23 methodology warnings
 concern missing external I/O delays; internal timing closure does not
 establish an external I/O timing budget.
 

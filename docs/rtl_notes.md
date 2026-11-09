@@ -7,7 +7,7 @@
 - main remains at 162764d. Prior implementation commits below are on rtl; OLED commit 91e0286 is on oled.
 - The final ASIC measurements come from 93ed933, GDS run 41988729116.
   Its six GitHub jobs passed. The FPGA-only OLED work preserves that ASIC design.
-- OLED Part 2 board checklist passed for b73e56ff...; observer: Troy. Date: Nov __, 2026 (day not supplied); no additional notes. This commit records the board-tested Part 2 version on oled.
+- OLED Part 2 board checklist passed for b73e56ff...; observer: Troy. Date: Nov 8, 2026; no additional notes. This commit records the board-tested Part 2 version on oled.
 
 | Step | Commit | Current result |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 | 6: chip wrapper | e3ef3e8; exact-latency follow-up b4fcc70 | Complete; chip-pin and GitHub checks passed |
 | 7: required mutations | c105b87 | Complete; every required mutation was caught |
 | 8: Nexys Video demo | 93ed933 | **Board checklist passed Nov 5, 2026; observer: Troy** |
-| 9: optional OLED | 91e0286; 054202b; this Part 2 commit on oled | **Board checklists passed for 92bc134d... and Part 2 b73e56ff...; observer: Troy. Part 2: Nov __, 2026 (day not supplied); no additional notes.** |
+| 9: optional OLED | 91e0286; 054202b; this Part 2 commit on oled | **Board checklists passed for 92bc134d... and Part 2 b73e56ff...; observer: Troy. Part 2: Nov 8, 2026; no additional notes.** |
 | 10: final notes and measurements | e8e710e | Area/power/frequency and nine answers recorded; all seven xsim reruns passed |
 
 The approved ASIC timing configuration is f71810b, between steps 7 and 8.
@@ -2927,9 +2927,9 @@ Troy passed the plain checklist on Nov 5, 2026 using bitstream 28671ec5...
 The complete plain and earlier OLED results are recorded in rtl_notes.md.
 
 Board result: PASSED, as reported by Troy for this exact OLED Part 2 image.
-Observer: Troy. Board-test date: Nov __, 2026 (day not supplied). Notes: no additional notes.
-Troy supplied November 2026 but left the day blank. The missing day is not inferred
-from the commit date. Individual readings were not supplied. Expected values
+Observer: Troy. Board-test date: Nov 8, 2026. Notes: no additional notes.
+Troy confirmed the board-test date as Nov 8, 2026. The date is the reported
+board-test date, not a date inferred from the commit. Individual readings were not supplied. Expected values
 and blank fields below remain as a reusable checklist, not pending acceptance.
 
 Tested bitstream SHA-256:
@@ -3087,7 +3087,7 @@ All six maps and 24 Boolean cases confirmed by: ____________________________
 #### Short retest for the Part 2 rebuild
 
 Troy reported this checklist passed for the exact Part 2 hash above.
-Date: Nov __, 2026 (day not supplied); no additional notes. The form remains available for future retests;
+Date: Nov 8, 2026; no additional notes. The form remains available for future retests;
 the Nov 5 results for the older images remain separate historical records.
 
 - [ ] After the plain prerequisite passes, run the three bring-up modes,
@@ -3165,7 +3165,7 @@ from Part 1; the Part 2 section below records its later hardware acceptance.
 
 OLED Part 2 was prepared as a separate change from 054202b on Nov 8,
 2026. Troy subsequently reported its board checklist passed and approved
-this commit and push on oled only. The board-test date is Nov __, 2026 (day not supplied); Troy reports no additional notes.
+this commit and push on oled only. The board-test date is Nov 8, 2026; Troy reports no additional notes.
 The older Step 8 and Step 9 implementation descriptions and board
 results above apply to their original tested images. The new wrapper reset
 behavior described here supersedes the older OLED wrapper behavior only
@@ -3619,11 +3619,11 @@ no source, test, build script or XDC changed after verification or testing.
 | --- | --- |
 | Result | OLED Part 2 board checklist passed, as reported by Troy |
 | Observer | Troy |
-| Board-test date | Nov __, 2026 (day not supplied) |
+| Board-test date | Nov 8, 2026 |
 | Notes | No additional notes |
 | Tested SHA-256 | b73e56ff6bc0b685c04e21fca6818a0c2c9b9cb86fba790bb95aea43a65a7148 |
 
-The missing day is not replaced with the commit date. No individual
+Troy explicitly confirmed Nov 8, 2026 as the board-test date. No individual
 measurements or additional observations are inferred from the overall pass.
 
 The tested image was copied to:
